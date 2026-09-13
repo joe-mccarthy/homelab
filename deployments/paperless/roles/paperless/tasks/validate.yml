@@ -59,6 +59,26 @@
     path: "{{ paperless.data_dir }}/media"
   register: paperless_media_directory
 
+- name: Inspect the existing Paperless application data directory
+  ansible.builtin.stat:
+    path: "{{ paperless.data_dir }}/data"
+  register: paperless_application_data_directory
+
+- name: Require the existing Paperless application data directory
+  ansible.builtin.assert:
+    that:
+      - >-
+        (paperless.allow_fresh_install | bool)
+        or (
+          (paperless_application_data_directory.stat.exists | default(false))
+          and (paperless_application_data_directory.stat.isdir | default(false))
+        )
+    fail_msg: >-
+      {{ paperless.data_dir }}/data must be the existing application data
+      directory. Correct the data path before replacing the running containers,
+      or explicitly set paperless_allow_fresh_install=true for an intentional
+      new installation.
+
 - name: Require the existing Paperless media directory
   ansible.builtin.assert:
     that:

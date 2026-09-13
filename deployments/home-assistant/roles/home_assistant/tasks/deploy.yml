@@ -7,6 +7,7 @@
       - home_assistant_homeassistant
       - home_assistant_zigbee2mqtt
       - home_assistant_matter-server
+      - home_assistant_matter-server-proxy
       - home_assistant_mqtt
 
 - name: Remove existing Home Assistant containers before deployment

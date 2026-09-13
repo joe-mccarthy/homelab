@@ -95,6 +95,8 @@ services:
       - "{{ home_assistant.data_dir }}/mosquitto:/mosquitto"
 
 networks:
+  default:
+    name: home_assistant_compose
   proxy:
     external: true
     name: "{{ home_assistant.proxy_network }}"

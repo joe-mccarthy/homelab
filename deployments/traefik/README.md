@@ -31,7 +31,7 @@ Run from the repository root:
 
 ```bash
 ansible-playbook -i inventory.yml deployments/traefik/deploy.yml \
-  -e target=odin --ask-vault-pass
+  -e target=odin --extra-vars @vault.yml --ask-vault-pass
 ```
 
 Add `--ask-become-pass` if the remote user requires a sudo password.

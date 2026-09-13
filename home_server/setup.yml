@@ -18,6 +18,20 @@
         name: "{{ target | string | trim }}"
         groups: home_server_bootstrap
 
+- name: Bootstrap home server Python runtime
+  hosts: home_server_bootstrap
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Install Python required by Ansible modules
+      ansible.builtin.raw: >-
+        if test -x /usr/bin/python3; then echo python-present;
+        else apt-get update && apt-get install -y python3 &&
+        echo python-installed; fi
+      register: home_server_python_bootstrap
+      changed_when: "'python-installed' in home_server_python_bootstrap.stdout"
+
 - name: Prepare home server
   hosts: home_server_bootstrap
   become: true
@@ -205,21 +219,54 @@
         name: "{{ home_server_proxy_network }}"
       register: home_server_proxy_network_info
 
-    - name: Require an attachable existing Swarm proxy network
+    - name: Inspect Docker runtime mode
+      ansible.builtin.command:
+        argv:
+          - docker
+          - info
+          - --format
+          - json
+      register: home_server_docker_info
+      changed_when: false
+
+    - name: Record whether Docker Swarm is active
+      ansible.builtin.set_fact:
+        home_server_swarm_active: >-
+          {{ (home_server_docker_info.stdout | from_json).Swarm.LocalNodeState
+             == 'active' }}
+
+    - name: Require a Swarm manager to create the shared overlay
+      ansible.builtin.assert:
+        that:
+          - >-
+            not home_server_swarm_active
+            or home_server_proxy_network_info.exists
+            or (home_server_docker_info.stdout | from_json).Swarm.ControlAvailable
+        fail_msg: >-
+          {{ home_server_proxy_network }} does not exist and this Swarm node is
+          not a manager. Create the attachable overlay on a manager first.
+
+    - name: Require a compatible existing proxy network
       ansible.builtin.assert:
         that:
           - >-
             not home_server_proxy_network_info.exists
-            or home_server_proxy_network_info.network.Scope != 'swarm'
-            or home_server_proxy_network_info.network.Attachable
+            or not home_server_swarm_active
+            or (
+              home_server_proxy_network_info.network.Scope == 'swarm'
+              and home_server_proxy_network_info.network.Driver == 'overlay'
+              and home_server_proxy_network_info.network.Attachable
+            )
         fail_msg: >-
-          Existing Swarm network {{ home_server_proxy_network }} is not
-          attachable. Recreate it as an attachable overlay during a maintenance
+          Swarm-active hosts require {{ home_server_proxy_network }} to be an
+          attachable overlay. Recreate the existing network during a maintenance
           window before moving proxy-connected services to Docker Compose.
 
     - name: Create shared reverse proxy network when absent
       community.docker.docker_network:
         name: "{{ home_server_proxy_network }}"
+        driver: "{{ home_server_swarm_active | ternary('overlay', 'bridge') }}"
+        attachable: "{{ home_server_swarm_active }}"
         state: present
       when: not home_server_proxy_network_info.exists
 

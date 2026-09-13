@@ -20,9 +20,9 @@ Docker Compose runs the project as `home_assistant` and assigns stable container
 
 ## Runtime Model
 
-All four containers run on the host passed through `-e target=...`. The deployment uses ordinary Docker Compose with no cluster state, node labels, placement constraints, or overlay networks.
+All four containers run on the host passed through `-e target=...`. The deployment uses ordinary Docker Compose without node labels or placement constraints. Its private project network is local; the external proxy network can be a bridge on a Compose-only host or an attachable overlay on a Swarm host.
 
-Home Assistant, Zigbee2MQTT, and Mosquitto share the Compose project network. Home Assistant and Zigbee2MQTT also join the local external `proxy` network so a local Traefik container can route HTTPS traffic to them.
+Home Assistant, Zigbee2MQTT, and Mosquitto share the Compose project network. Home Assistant and Zigbee2MQTT also join the external `proxy` network so the local Traefik container can route HTTPS traffic to them.
 
 Matter Server uses `network_mode: host` because Matter device discovery and control require LAN IPv6 and mDNS multicast. Home Assistant connects to it through the host's stable LAN address:
 
@@ -49,12 +49,12 @@ The rendered Compose project remains at `/opt/home-assistant/compose.yaml` so no
 - Docker Engine and the Docker Compose v2 plugin on that host.
 - The `community.docker` Ansible collection from [`requirements.yml`](../../requirements.yml).
 - `/exports/docker` available as local persistent storage, or `home_assistant.data_dir` changed to another local path.
-- A local Traefik deployment attached to the `proxy` bridge network.
+- A local Traefik deployment attached to the external `proxy` network.
 - A Zigbee coordinator available through a local `/dev/...` path or a `tcp://...` endpoint.
 - Working IPv6 and mDNS/multicast between this host and Matter devices.
 - Vault values defined from [`../../vault.template.yml`](../../vault.template.yml).
 
-The machine bootstrap creates the external `proxy` bridge; this deployment does not manage it.
+The machine bootstrap creates the external `proxy` bridge on a Compose-only host or an attachable overlay on a Swarm host; this deployment does not manage it.
 
 ## Deploy
 
@@ -62,7 +62,7 @@ Run from the repository root:
 
 ```bash
 ansible-playbook -i inventory.yml deployments/home-assistant/deploy.yml \
-  -e target=odin --ask-vault-pass
+  -e target=odin --extra-vars @vault.yml --ask-vault-pass
 ```
 
 Add `--ask-become-pass` if the remote user requires a sudo password.
@@ -89,9 +89,9 @@ The deployment:
 6. Stops and removes containers using the deployment's fixed names while retaining volumes.
 7. Reapplies Matter Server data ownership after its container has stopped.
 8. Runs `docker compose up` with forced recreation and waits for all four containers without another registry request.
-10. Fails unless every expected service is running.
+9. Fails unless every expected service is running.
 
-Only the five known names `homeassistant`, `zigbee2mqtt`, `matter-server`, `mqtt`, and the obsolete `matter-server-proxy` are removed. The role does not inspect cluster state or broadly prune unrelated containers.
+Only the known Home Assistant Swarm services and the five container names `homeassistant`, `zigbee2mqtt`, `matter-server`, `mqtt`, and the obsolete `matter-server-proxy` are removed. The role does not broadly prune unrelated services or containers.
 
 ## Configuration
 
@@ -185,7 +185,7 @@ This setup supports Wi-Fi Matter devices. Thread devices additionally require a 
 
 | Symptom | Check |
 | --- | --- |
-| Only Matter Server starts | Inspect `proxy` with `docker network inspect proxy`; it must use the local `bridge` driver. |
+| Only Matter Server starts | Inspect `proxy` with `docker network inspect proxy`; it must be a bridge on a Compose-only host or an attachable overlay on a Swarm host. |
 | Deployment reports a missing service | Run `sudo docker compose --project-directory /opt/home-assistant ps --all` and inspect the failed service's logs. |
 | Home Assistant proxy errors | Update `vault.services.home_assistant.proxy` for the local proxy bridge CIDR. |
 | Zigbee2MQTT cannot open the coordinator | For local hardware, verify the device path and ownership. For TCP hardware, verify the host and port are reachable. |

@@ -47,15 +47,9 @@ The first play adds the address to an in-memory inventory for the duration of
 the run. Reconnect afterward if the connection user needs its new Docker group
 membership in an interactive shell.
 
-The storage and network defaults can be overridden with extra variables:
-
-```bash
-ansible-playbook -i inventory.yml home_server/setup.yml \
-  -e target=odin \
-  -e home_server_data_root=/exports/docker \
-  -e home_server_proxy_network=proxy \
-  --extra-vars @vault.yml --ask-vault-pass
-```
+The bootstrap and service roles default to `/exports/docker`, `/opt`, and the
+`proxy` network. Change the corresponding service variables as well if these
+paths or the network name need to differ.
 
 Each registry entry must contain non-empty credentials:
 

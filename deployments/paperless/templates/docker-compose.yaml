@@ -115,6 +115,8 @@ services:
     restart: unless-stopped
 
 networks:
+  default:
+    name: paperless_compose
   proxy:
     external: true
     name: "{{ paperless.proxy_network }}"

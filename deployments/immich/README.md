@@ -59,7 +59,7 @@ Before the first Compose start:
 
 The play requires the existing PostgreSQL `PG_VERSION` file and all six Immich `.immich` media markers before deployment. These checks prevent a wrong path from becoming a fresh, empty installation.
 
-This deployment assumes a clean Docker host. It does not inspect or remove Docker Swarm services, stacks, or overlay networks.
+During migration, the deployment removes the four known legacy `immich_*` Swarm services. It does not prune unrelated services, stacks, or overlay networks.
 
 ## Configuration
 

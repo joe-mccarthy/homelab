@@ -20,6 +20,10 @@ services:
       PROXIED: 'true'
       IP6_PROVIDER: none
 
+networks:
+  default:
+    name: ddns_compose
+
 secrets:
   cf_token:
     file: ./secrets/cf_token

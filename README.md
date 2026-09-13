@@ -122,7 +122,8 @@ This installs Docker, configures NFS, initializes the Swarm, joins managers and 
 ### 7. Deploy the Core Services
 
 ```bash
-ansible-playbook -i inventory.yml deployments/core-deployments/deploy.yml --ask-vault-pass
+ansible-playbook -i inventory.yml deployments/core-deployments/deploy.yml \
+  --extra-vars @vault.yml --ask-vault-pass
 ```
 
 The core deployment brings up the foundation used by the rest of the lab, including routing and DNS support.
@@ -151,14 +152,15 @@ The full service catalog lives in [`deployments/README.md`](deployments/README.m
 To deploy a single service:
 
 ```bash
-ansible-playbook -i inventory.yml deployments/<service>/deploy.yml --ask-vault-pass
+ansible-playbook -i inventory.yml deployments/<service>/deploy.yml \
+  --extra-vars @vault.yml --ask-vault-pass
 ```
 
 For example:
 
 ```bash
 ansible-playbook -i inventory.yml deployments/immich/deploy.yml \
-  -e target=odin --ask-vault-pass
+  -e target=odin --extra-vars @vault.yml --ask-vault-pass
 ```
 
 ---

@@ -45,11 +45,11 @@ The legacy floating `redis:8` image can write RDB format 14. Redis versions befo
 
 ## Existing Data
 
-The play requires an initialized PostgreSQL 18 cluster under `/exports/docker/paperless/database` and the existing `media` directory. It verifies the cluster's `PG_VERSION` marker before replacing containers, preventing an incorrect path from silently creating an empty database.
+The play requires an initialized PostgreSQL 18 cluster under `/exports/docker/paperless/database` and the existing `data` and `media` directories. It verifies the cluster's `PG_VERSION` marker before replacing containers, preventing an incorrect path from silently creating an empty database.
 
 The Compose settings retain automatic OCR, archive generation, and duplicate rejection. Tika remains on the latest release pinned by Paperless upstream because Tika 4 is not yet the supported conversion image.
 
-This deployment assumes a clean Docker host. It does not inspect or remove Docker Swarm services, stacks, or overlay networks.
+During migration, the deployment removes the four known legacy `paperless_*` Swarm services. It does not prune unrelated services, stacks, or overlay networks.
 
 ## Configuration
 

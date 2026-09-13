@@ -86,6 +86,8 @@ services:
       disable: false
 
 networks:
+  default:
+    name: immich_compose
   proxy:
     external: true
     name: "{{ immich.proxy_network }}"

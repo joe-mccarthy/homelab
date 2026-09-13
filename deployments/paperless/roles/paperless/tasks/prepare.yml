@@ -10,6 +10,12 @@
     state: started
     enabled: true
 
+- name: Validate Paperless proxy network
+  ansible.builtin.include_role:
+    name: validate_proxy_network
+  vars:
+    validate_proxy_network_name: "{{ paperless.proxy_network }}"
+
 - name: Write Paperless secrets
   ansible.builtin.copy:
     content: "{{ item.value }}"

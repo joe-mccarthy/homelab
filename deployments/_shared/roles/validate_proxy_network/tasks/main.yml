@@ -1,0 +1,43 @@
+---
+- name: Inspect Docker runtime mode for proxy validation
+  ansible.builtin.command:
+    argv:
+      - docker
+      - info
+      - --format
+      - json
+  register: validate_proxy_network_docker_info
+  changed_when: false
+
+- name: Inspect external proxy network
+  community.docker.docker_network_info:
+    name: "{{ validate_proxy_network_name }}"
+  register: validate_proxy_network_info
+
+- name: Require a usable external proxy network
+  ansible.builtin.assert:
+    that:
+      - validate_proxy_network_info.exists
+      - >-
+        not validate_proxy_network_info.exists
+        or (
+          (
+            (validate_proxy_network_docker_info.stdout |
+             from_json).Swarm.LocalNodeState == 'active'
+            and (validate_proxy_network_docker_info.stdout |
+                 from_json).Swarm.ControlAvailable
+            and validate_proxy_network_info.network.Scope == 'swarm'
+            and validate_proxy_network_info.network.Driver == 'overlay'
+            and validate_proxy_network_info.network.Attachable
+          )
+          or (
+            (validate_proxy_network_docker_info.stdout |
+             from_json).Swarm.LocalNodeState != 'active'
+            and validate_proxy_network_info.network.Scope == 'local'
+            and validate_proxy_network_info.network.Driver == 'bridge'
+          )
+        )
+    fail_msg: >-
+      External network {{ validate_proxy_network_name }} must exist as either a
+      local bridge when Swarm is inactive or an attachable overlay on a Swarm
+      manager before deployment cutover.

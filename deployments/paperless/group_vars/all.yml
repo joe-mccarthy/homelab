@@ -5,6 +5,7 @@ paperless:
   compose_dir: /opt/paperless
   proxy_network: proxy
   allow_fresh_install: "{{ paperless_allow_fresh_install | default(false) }}"
+  sqlite_migration: "{{ paperless_sqlite_migration | default(false) }}"
 
   # Stable application and database credentials (from Ansible Vault)
   secret_key: "{{ vault.services.paperless.secret_key }}"

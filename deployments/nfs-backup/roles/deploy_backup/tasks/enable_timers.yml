@@ -1,43 +1,55 @@
 ---
-# ACTIVATE THE PREPARED TIMERS
-#
-# This file is called only after the parent playbook completes installation and
-# validation. Separating activation from main.yml keeps that safety barrier.
-
-- name: Recheck repository locks before scheduler cutover
-  ansible.builtin.command:
-    cmd: /usr/local/sbin/nfs-backup-job restic list locks
-  register: deploy_backup_cutover_repository_locks
-  changed_when: false
-
-- name: Refuse to stop the legacy scheduler during a repository operation
-  ansible.builtin.assert:
-    that:
-      - >-
-        deploy_backup_cutover_repository_locks.stdout |
-        regex_findall('(?m)^[0-9a-f]{64}$') | length == 0
-    fail_msg: >-
-      The Restic repository became locked during deployment; the legacy
-      scheduler remains enabled and the cutover has been cancelled.
-
-- name: Remove legacy scheduled backup Swarm services
+# Confirm manager access before pausing any existing replacement scheduler.
+- name: Preflight legacy Swarm scheduler cleanup
   ansible.builtin.include_role:
     name: remove_legacy_swarm_services
   vars:
+    remove_legacy_swarm_services_check_only: true
     remove_legacy_swarm_services_list:
       - nfs_backup_restic_backup
       - nfs_backup_restic_prune
       - nfs_backup_restic_check
 
-# Enabling creates boot-time symlinks under timers.target.wants. `started`
-# makes timers active immediately without running their service before
-# OnCalendar is reached. Each registered result retains the original job item,
-# so only a timer whose own rendered file changed needs to restart.
-- name: Enable scheduled backup timers
-  ansible.builtin.systemd:
-    name: "nfs-backup-{{ item.item.key }}.timer"
-    enabled: true
-    state: "{{ item.changed | ternary('restarted', 'started') }}"
-  loop: "{{ deploy_backup_timer_units.results }}"
-  loop_control:
-    label: "{{ item.item.key }}"
+- name: Activate validated backup scheduler
+  block:
+    - name: Recheck repository locks before scheduler cutover
+      ansible.builtin.command:
+        cmd: /usr/local/sbin/nfs-backup-job restic list locks
+      register: deploy_backup_cutover_repository_locks
+      changed_when: false
+      environment:
+        NFS_BACKUP_MAINTENANCE: "1"
+
+    - name: Refuse scheduler cutover during a repository operation
+      ansible.builtin.assert:
+        that:
+          - >-
+            deploy_backup_cutover_repository_locks.stdout |
+            regex_findall('(?m)^[0-9a-f]{64}$') | length == 0
+        fail_msg: >-
+          The Restic repository became locked during deployment; the previous
+          timer state will be restored.
+
+    # The maintenance marker prevents a newly enabled timer from entering the
+    # repository before legacy scheduler removal completes.
+    - name: Enable scheduled backup timers
+      ansible.builtin.systemd:
+        name: "nfs-backup-{{ item.item.key }}.timer"
+        enabled: true
+        state: "{{ item.changed | ternary('restarted', 'started') }}"
+      loop: "{{ deploy_backup_timer_units.results }}"
+      loop_control:
+        label: "{{ item.item.key }}"
+
+    - name: Record replacement scheduler activation
+      ansible.builtin.set_fact:
+        deploy_backup_scheduler_activated: true
+
+    - name: Remove legacy scheduled backup Swarm services
+      ansible.builtin.include_role:
+        name: remove_legacy_swarm_services
+      vars:
+        remove_legacy_swarm_services_list:
+          - nfs_backup_restic_backup
+          - nfs_backup_restic_prune
+          - nfs_backup_restic_check

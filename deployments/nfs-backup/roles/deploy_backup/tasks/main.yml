@@ -19,83 +19,6 @@
     state: started
     enabled: true
 
-# A later deployment may find the replacement scheduler already installed.
-# Pause existing timers before changing credentials, the runner, or unit files;
-# otherwise a timer could start a job while those files are being replaced.
-- name: Inspect existing backup timer files
-  ansible.builtin.stat:
-    path: "/etc/systemd/system/nfs-backup-{{ item }}.timer"
-  loop:
-    - backup
-    - prune
-    - check
-  loop_control:
-    label: "{{ item }}"
-  register: deploy_backup_existing_timer_files
-
-- name: Pause existing backup timers during deployment
-  ansible.builtin.systemd:
-    name: "nfs-backup-{{ item.item }}.timer"
-    enabled: false
-    state: stopped
-  loop: "{{ deploy_backup_existing_timer_files.results }}"
-  loop_control:
-    label: "{{ item.item }}"
-  when: item.stat.exists
-
-# Stopping a timer prevents future activation but deliberately does not kill a
-# one-shot service that is already running. Detect those jobs and leave timers
-# disabled until the operator reruns deployment after they finish.
-- name: Inspect existing backup service activity
-  ansible.builtin.command:
-    argv:
-      - systemctl
-      - is-active
-      - "nfs-backup@{{ item }}.service"
-  loop:
-    - backup
-    - prune
-    - check
-  loop_control:
-    label: "{{ item }}"
-  register: deploy_backup_existing_services
-  changed_when: false
-  failed_when: false
-
-- name: Refuse to rewrite files while a backup job is active
-  ansible.builtin.assert:
-    that:
-      - >-
-        (item.stdout | trim) not in
-        ['active', 'activating', 'deactivating', 'reloading']
-    fail_msg: >-
-      {{ item.item }} is still active; timers have been disabled, so wait
-      for the job to finish and rerun this playbook
-  loop: "{{ deploy_backup_existing_services.results }}"
-  loop_control:
-    label: "{{ item.item }}"
-
-# Check the same advisory lock used by manually launched runner commands. This
-# catches local work that did not start through a systemd service instance.
-- name: Check host backup lock before replacing files
-  ansible.builtin.command:
-    argv:
-      - flock
-      - --nonblock
-      - /run/lock/nfs-backup.lock
-      - "true"
-  register: deploy_backup_host_lock_check
-  changed_when: false
-  failed_when: false
-
-- name: Refuse to rewrite files while a manual backup job is active
-  ansible.builtin.assert:
-    that:
-      - deploy_backup_host_lock_check.rc == 0
-    fail_msg: >-
-      A local nfs-backup-job command is active; timers have been disabled, so
-      wait for it to finish and rerun this playbook
-
 # Validate secrets before writing files. Newline
 # characters cannot be represented safely by Docker's line-based env-file
 # syntax. Password files also trim surrounding whitespace in Restic, so reject
@@ -153,30 +76,47 @@
   register: deploy_backup_canonical_source
   changed_when: false
 
-- name: Resolve canonical restore path
+- name: Resolve canonical managed backup paths
   ansible.builtin.command:
     argv:
       - realpath
       - --canonicalize-missing
-      - "{{ nfs_backup.restore_path }}"
-  register: deploy_backup_canonical_restore
+      - "{{ item.path }}"
+  loop:
+    - name: restore_path
+      path: "{{ nfs_backup.restore_path }}"
+    - name: cache_path
+      path: "{{ nfs_backup.cache_path }}"
+    - name: config_path
+      path: "{{ nfs_backup.config_path }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: deploy_backup_canonical_managed_paths
   changed_when: false
 
-- name: Keep restore output outside the backup source
+- name: Keep managed backup paths outside the backup source
   ansible.builtin.assert:
     that:
       - >-
-        deploy_backup_canonical_restore.stdout
+        item.stdout
         != deploy_backup_canonical_source.stdout
       - deploy_backup_canonical_source.stdout != '/'
+      - item.stdout != '/'
       - >-
-        not deploy_backup_canonical_restore.stdout.startswith(
+        not item.stdout.startswith(
           deploy_backup_canonical_source.stdout ~ '/'
         )
+      - >-
+        not deploy_backup_canonical_source.stdout.startswith(
+          item.stdout ~ '/'
+        )
     fail_msg: >-
-      Restore path {{ nfs_backup.restore_path }} must resolve outside backup
-      source {{ nfs_backup.source_path }} to protect live data and prevent
-      restored files from entering later backups
+      {{ item.item.name }} {{ item.item.path }} must resolve outside backup
+      source {{ nfs_backup.source_path }} to protect credentials and prevent
+      generated or restored files from entering later backups
+  loop: "{{ deploy_backup_canonical_managed_paths.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
 
 # Directory permissions are deliberately root-only:
 # - config_path contains secrets;
@@ -299,6 +239,8 @@
     cmd: /usr/local/sbin/nfs-backup-job verify
   register: deploy_backup_repository_check
   changed_when: false
+  environment:
+    NFS_BACKUP_MAINTENANCE: "1"
 
 # Opening any Restic repository is not enough: it could be the wrong repository.
 # Require an existing snapshot created for host `nfs-backup`, source path
@@ -322,6 +264,8 @@
     cmd: /usr/local/sbin/nfs-backup-job restic list locks
   register: deploy_backup_repository_locks
   changed_when: false
+  environment:
+    NFS_BACKUP_MAINTENANCE: "1"
 
 # Never enable scheduled jobs while Restic reports a lock. A stale lock must be
 # investigated and explicitly removed by an operator before retrying.

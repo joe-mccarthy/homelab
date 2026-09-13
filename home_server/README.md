@@ -16,6 +16,8 @@ with migration guidance rather than replacing a non-attachable overlay.
 
 - The target account must have sudo access.
 - The target must run Debian or Ubuntu.
+- A Swarm-active target must be a manager so the migration can remove legacy
+  services and retain Traefik discovery for services not yet migrated.
 - Install the repository collections with
   `ansible-galaxy collection install -r requirements.yml`.
 - Create and encrypt `vault.yml` with a `vault.docker_registries` list based on

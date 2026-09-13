@@ -10,6 +10,12 @@
     state: started
     enabled: true
 
+- name: Validate Traefik proxy network
+  ansible.builtin.include_role:
+    name: validate_proxy_network
+  vars:
+    validate_proxy_network_name: "{{ traefik.proxy_network }}"
+
 - name: Write Traefik Cloudflare secrets
   ansible.builtin.copy:
     content: "{{ item.value }}"

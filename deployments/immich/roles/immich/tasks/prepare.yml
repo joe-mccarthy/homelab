@@ -10,6 +10,12 @@
     state: started
     enabled: true
 
+- name: Validate Immich proxy network
+  ansible.builtin.include_role:
+    name: validate_proxy_network
+  vars:
+    validate_proxy_network_name: "{{ immich.proxy_network }}"
+
 - name: Write Immich database secrets
   ansible.builtin.copy:
     content: "{{ item.value }}"

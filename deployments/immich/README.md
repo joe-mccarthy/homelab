@@ -13,9 +13,12 @@ An Ansible-managed, single-host Docker Compose deployment of Immich, PostgreSQL,
 | `immich-redis` | `valkey/valkey:9` pinned by digest | Cache and job coordination. |
 | `immich-database` | Immich PostgreSQL 14 image pinned by digest | Metadata and vector search database. |
 
-All containers run on the host passed through `-e target=...`. Docker Swarm placement and overlay networks are not used by the resulting deployment.
+All containers run on the host passed through `-e target=...`. Docker Swarm
+placement is not used. The private project network is local, while the external
+proxy network can be an attachable overlay on a Swarm manager.
 
-The server joins the local external `proxy` bridge for Traefik. Database, Valkey, and machine learning traffic remains on the private Compose project network.
+The server joins the external `proxy` network for Traefik. Database, Valkey, and
+machine learning traffic remains on the private Compose project network.
 
 ## Paths
 
@@ -36,8 +39,8 @@ The server joins the local external `proxy` bridge for Traefik. Database, Valkey
 - Docker Engine and the Docker Compose v2 plugin on that host.
 - The `community.docker` collection from [`requirements.yml`](../../requirements.yml).
 - `/exports/docker` on local storage, or `immich.data_dir` changed to another local path.
-- The machine bootstrap's local `proxy` bridge network.
-- A local Traefik container attached to the `proxy` bridge.
+- The machine bootstrap's external `proxy` network.
+- A local Traefik container attached to that bridge or attachable overlay.
 - DNS for `immich.<domain>` directed to Traefik.
 - At least 6 GB RAM; 8 GB and four CPU cores are recommended.
 - An x86-64-v2 or newer CPU when using x86 machine-learning images.

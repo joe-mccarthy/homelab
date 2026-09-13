@@ -1,8 +1,25 @@
 ---
 - name: Inspect Docker Swarm state
-  community.docker.docker_swarm_info:
-  register: remove_legacy_swarm_services_info
-  failed_when: false
+  ansible.builtin.command:
+    argv:
+      - docker
+      - info
+      - --format
+      - json
+  register: remove_legacy_swarm_services_docker_info
+  changed_when: false
+
+- name: Require a Swarm manager for legacy service cleanup
+  ansible.builtin.assert:
+    that:
+      - >-
+        (remove_legacy_swarm_services_docker_info.stdout |
+         from_json).Swarm.LocalNodeState != 'active'
+        or (remove_legacy_swarm_services_docker_info.stdout |
+            from_json).Swarm.ControlAvailable
+    fail_msg: >-
+      Legacy Swarm services can only be inspected and removed on a manager.
+      Run this migration against a Swarm manager.
 
 - name: Remove legacy Docker Swarm services
   community.docker.docker_swarm_service:
@@ -12,4 +29,6 @@
   loop_control:
     label: "{{ item }}"
   when: >-
-    remove_legacy_swarm_services_info.docker_swarm_active | default(false)
+    (remove_legacy_swarm_services_docker_info.stdout |
+     from_json).Swarm.LocalNodeState == 'active'
+    and not (remove_legacy_swarm_services_check_only | default(false) | bool)

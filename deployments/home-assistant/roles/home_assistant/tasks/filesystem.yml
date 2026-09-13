@@ -16,6 +16,7 @@
     group: nogroup
   loop:
     - mosquitto
+    - themes
     - zigbee2mqtt
     - zigbee2mqtt/data
 

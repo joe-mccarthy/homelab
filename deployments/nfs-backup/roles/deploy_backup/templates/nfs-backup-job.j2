@@ -28,12 +28,18 @@ if [[ -z "$job" ]]; then
 fi
 shift
 
-# Restic has repository-level locks, but acquiring those requires contacting S3.
-# This inexpensive host lock first serializes scheduled and manual local jobs.
-# File descriptor 9 remains open after `exec docker`, so the lock is held until
-# the attached container exits.
-exec 9>/run/lock/nfs-backup.lock
-flock 9
+# Deployment verification runs while Ansible holds the host lock continuously.
+# Every normal invocation acquires that lock and then honors the maintenance
+# marker before contacting the repository.
+if [[ "${NFS_BACKUP_MAINTENANCE:-0}" != 1 ]]; then
+  exec 9>/run/lock/nfs-backup.lock
+  flock 9
+
+  if [[ -e /run/nfs-backup-maintenance ]]; then
+    echo "Backup maintenance is in progress; retry after deployment completes." >&2
+    exit 75
+  fi
+fi
 
 # Arguments common to every temporary container.
 docker_args=(

@@ -10,6 +10,12 @@
     state: started
     enabled: true
 
+- name: Validate Home Assistant proxy network
+  ansible.builtin.include_role:
+    name: validate_proxy_network
+  vars:
+    validate_proxy_network_name: "{{ home_assistant.proxy_network }}"
+
 - name: Render Home Assistant Compose project
   ansible.builtin.template:
     src: templates/docker-compose.yaml

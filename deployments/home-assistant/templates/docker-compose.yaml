@@ -45,6 +45,10 @@ services:
     volumes:
       - "{{ home_assistant.data_dir }}/zigbee2mqtt/data:/app/data"
       - /run/udev:/run/udev:ro
+{% if home_assistant.zigbee_serial_port is match('^/dev/') %}
+    devices:
+      - "{{ home_assistant.zigbee_serial_port }}:{{ home_assistant.zigbee_serial_port }}"
+{% endif %}
     environment:
       TZ: Europe/London
     depends_on:

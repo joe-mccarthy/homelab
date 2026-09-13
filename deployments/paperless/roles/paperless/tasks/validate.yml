@@ -22,13 +22,18 @@
 - name: Require the existing Paperless PostgreSQL cluster
   ansible.builtin.assert:
     that:
-      - paperless_database_version.stat.exists | default(false)
-      - paperless_database_version.stat.isreg | default(false)
-      - paperless_database_version.stat.size | default(0) | int > 0
+      - >-
+        (paperless.allow_fresh_install | bool)
+        or (
+          (paperless_database_version.stat.exists | default(false))
+          and (paperless_database_version.stat.isreg | default(false))
+          and (paperless_database_version.stat.size | default(0) | int > 0)
+        )
     fail_msg: >-
       {{ paperless.database.data_dir }} must contain the initialized PostgreSQL
       {{ paperless.database.major_version }} cluster. Correct the data path
-      before replacing the running containers.
+      before replacing the running containers, or explicitly set
+      paperless_allow_fresh_install=true for an intentional new installation.
 
 - name: Read the Paperless PostgreSQL cluster version
   ansible.builtin.slurp:
@@ -36,6 +41,7 @@
       {{ paperless.database.data_dir }}/{{ paperless.database.major_version
       }}/docker/PG_VERSION
   register: paperless_database_version_file
+  when: paperless_database_version.stat.exists | default(false)
 
 - name: Require the configured Paperless PostgreSQL major version
   ansible.builtin.assert:
@@ -46,6 +52,7 @@
     fail_msg: >-
       The existing Paperless PostgreSQL cluster does not match configured major
       version {{ paperless.database.major_version }}.
+  when: paperless_database_version.stat.exists | default(false)
 
 - name: Inspect the existing Paperless media directory
   ansible.builtin.stat:
@@ -55,11 +62,17 @@
 - name: Require the existing Paperless media directory
   ansible.builtin.assert:
     that:
-      - paperless_media_directory.stat.exists | default(false)
-      - paperless_media_directory.stat.isdir | default(false)
+      - >-
+        (paperless.allow_fresh_install | bool)
+        or (
+          (paperless_media_directory.stat.exists | default(false))
+          and (paperless_media_directory.stat.isdir | default(false))
+        )
     fail_msg: >-
       {{ paperless.data_dir }}/media must be the existing document media
-      directory. Correct the data path before replacing the running containers.
+      directory. Correct the data path before replacing the running containers,
+      or explicitly set paperless_allow_fresh_install=true for an intentional
+      new installation.
 
 - name: Validate Paperless secret key
   ansible.builtin.assert:

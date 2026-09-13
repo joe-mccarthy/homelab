@@ -1,0 +1,15 @@
+---
+- name: Inspect Docker Swarm state
+  community.docker.docker_swarm_info:
+  register: remove_legacy_swarm_services_info
+  failed_when: false
+
+- name: Remove legacy Docker Swarm services
+  community.docker.docker_swarm_service:
+    name: "{{ item }}"
+    state: absent
+  loop: "{{ remove_legacy_swarm_services_list }}"
+  loop_control:
+    label: "{{ item }}"
+  when: >-
+    remove_legacy_swarm_services_info.docker_swarm_active | default(false)

@@ -1,4 +1,11 @@
 ---
+- name: Remove the legacy DDNS Swarm service before deployment
+  ansible.builtin.include_role:
+    name: remove_legacy_swarm_services
+  vars:
+    remove_legacy_swarm_services_list:
+      - ddns_cloudflare-ddns
+
 - name: Remove the existing DDNS container before deployment
   community.docker.docker_container:
     name: cloudflare-ddns

@@ -19,6 +19,15 @@
     state: started
     enabled: true
 
+- name: Remove legacy scheduled backup Swarm services
+  ansible.builtin.include_role:
+    name: remove_legacy_swarm_services
+  vars:
+    remove_legacy_swarm_services_list:
+      - nfs_backup_restic_backup
+      - nfs_backup_restic_prune
+      - nfs_backup_restic_check
+
 # A later deployment may find the replacement scheduler already installed.
 # Pause existing timers before changing credentials, the runner, or unit files;
 # otherwise a timer could start a job while those files are being replaced.

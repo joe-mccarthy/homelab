@@ -1,4 +1,14 @@
 ---
+- name: Remove legacy Immich Swarm services before deployment
+  ansible.builtin.include_role:
+    name: remove_legacy_swarm_services
+  vars:
+    remove_legacy_swarm_services_list:
+      - immich_immich-database
+      - immich_immich-machine-learning
+      - immich_immich-redis
+      - immich_immich-server
+
 - name: Remove existing Immich containers before deployment
   community.docker.docker_container:
     name: "{{ item }}"

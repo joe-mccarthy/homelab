@@ -200,11 +200,28 @@
       loop: "{{ home_server_docker_registries }}"
       no_log: true
 
-    - name: Create shared reverse proxy network
+    - name: Inspect the shared reverse proxy network
+      community.docker.docker_network_info:
+        name: "{{ home_server_proxy_network }}"
+      register: home_server_proxy_network_info
+
+    - name: Require an attachable existing Swarm proxy network
+      ansible.builtin.assert:
+        that:
+          - >-
+            not home_server_proxy_network_info.exists
+            or home_server_proxy_network_info.network.Scope != 'swarm'
+            or home_server_proxy_network_info.network.Attachable
+        fail_msg: >-
+          Existing Swarm network {{ home_server_proxy_network }} is not
+          attachable. Recreate it as an attachable overlay during a maintenance
+          window before moving proxy-connected services to Docker Compose.
+
+    - name: Create shared reverse proxy network when absent
       community.docker.docker_network:
         name: "{{ home_server_proxy_network }}"
-        driver: bridge
         state: present
+      when: not home_server_proxy_network_info.exists
 
     - name: Verify Docker Engine
       ansible.builtin.command:

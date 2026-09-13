@@ -24,6 +24,16 @@
       value: "{{ traefik.cf_email }}"
   no_log: true
 
+- name: Inspect Docker runtime mode
+  ansible.builtin.command:
+    argv:
+      - docker
+      - info
+      - --format
+      - json
+  register: traefik_docker_info
+  changed_when: false
+
 - name: Render Traefik Compose project
   ansible.builtin.template:
     src: templates/docker-compose.yaml

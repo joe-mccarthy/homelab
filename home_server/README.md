@@ -7,8 +7,10 @@ an inventory alias, DNS name, or IP address.
 It installs Docker Engine and the Compose plugin from Docker's official APT
 repository, enables bounded container logs, adds the Ansible connection user to
 the `docker` group, creates `/exports/docker` and `/opt`, creates the local
-`proxy` bridge network, logs in to every Docker registry configured in the
-vault, and verifies the Docker installation.
+`proxy` network, logs in to every Docker registry configured in the vault, and
+verifies the Docker installation. An existing attachable Swarm overlay is
+preserved so Compose and legacy Swarm services can share it. The playbook stops
+with migration guidance rather than replacing a non-attachable overlay.
 
 ## Prerequisites
 
@@ -72,13 +74,18 @@ After configuring the required values in the Ansible Vault, deploy services in
 dependency order:
 
 ```bash
-ansible-playbook -i inventory.yml deployments/traefik/deploy.yml -e target=odin --ask-vault-pass
-ansible-playbook -i inventory.yml deployments/ddns/deploy.yml -e target=odin --ask-vault-pass
-ansible-playbook -i inventory.yml deployments/home-assistant/deploy.yml -e target=odin --ask-vault-pass
+ansible-playbook -i inventory.yml deployments/traefik/deploy.yml -e target=odin \
+  --extra-vars @vault.yml --ask-vault-pass
+ansible-playbook -i inventory.yml deployments/ddns/deploy.yml -e target=odin \
+  --extra-vars @vault.yml --ask-vault-pass
+ansible-playbook -i inventory.yml deployments/home-assistant/deploy.yml -e target=odin \
+  --extra-vars @vault.yml --ask-vault-pass
 ansible-playbook -i inventory.yml deployments/paperless/deploy.yml \
-  -e target=odin --ask-vault-pass -e paperless_allow_fresh_install=true
+  -e target=odin -e paperless_allow_fresh_install=true \
+  --extra-vars @vault.yml --ask-vault-pass
 ansible-playbook -i inventory.yml deployments/immich/deploy.yml \
-  -e target=odin --ask-vault-pass -e immich_allow_fresh_install=true
+  -e target=odin -e immich_allow_fresh_install=true \
+  --extra-vars @vault.yml --ask-vault-pass
 ```
 
 The Paperless and Immich commands above intentionally initialize empty data

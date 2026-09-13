@@ -142,6 +142,42 @@
       Backup source {{ nfs_backup.source_path }} is not a directory on
       {{ inventory_hostname }}
 
+# Resolve paths on the managed host so symlinks and `..` cannot bypass the
+# restore isolation guard. The restore directory may not exist yet.
+- name: Resolve canonical backup source path
+  ansible.builtin.command:
+    argv:
+      - realpath
+      - --canonicalize-existing
+      - "{{ nfs_backup.source_path }}"
+  register: deploy_backup_canonical_source
+  changed_when: false
+
+- name: Resolve canonical restore path
+  ansible.builtin.command:
+    argv:
+      - realpath
+      - --canonicalize-missing
+      - "{{ nfs_backup.restore_path }}"
+  register: deploy_backup_canonical_restore
+  changed_when: false
+
+- name: Keep restore output outside the backup source
+  ansible.builtin.assert:
+    that:
+      - >-
+        deploy_backup_canonical_restore.stdout
+        != deploy_backup_canonical_source.stdout
+      - deploy_backup_canonical_source.stdout != '/'
+      - >-
+        not deploy_backup_canonical_restore.stdout.startswith(
+          deploy_backup_canonical_source.stdout ~ '/'
+        )
+    fail_msg: >-
+      Restore path {{ nfs_backup.restore_path }} must resolve outside backup
+      source {{ nfs_backup.source_path }} to protect live data and prevent
+      restored files from entering later backups
+
 # Directory permissions are deliberately root-only:
 # - config_path contains secrets;
 # - cache_path contains repository metadata;

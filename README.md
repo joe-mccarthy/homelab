@@ -153,7 +153,7 @@ To deploy a single service:
 
 ```bash
 ansible-playbook -i inventory.yml deployments/<service>/deploy.yml \
-  --extra-vars @vault.yml --ask-vault-pass
+  -e target=<host-or-address> --extra-vars @vault.yml --ask-vault-pass
 ```
 
 For example:

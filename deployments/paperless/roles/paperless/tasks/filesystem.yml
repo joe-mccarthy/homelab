@@ -36,6 +36,33 @@
     owner: '999'
     group: '999'
 
+- name: Identify the Paperless PostgreSQL filesystem
+  ansible.builtin.command:
+    argv:
+      - stat
+      - --file-system
+      - --format=%T
+      - "{{ paperless.database.data_dir }}"
+  register: paperless_database_filesystem
+  changed_when: false
+
+- name: Require a supported local PostgreSQL filesystem
+  ansible.builtin.assert:
+    that:
+      - paperless_database_filesystem.stdout in paperless_local_filesystems
+    fail_msg: >-
+      {{ paperless.database.data_dir }} uses unsupported filesystem
+      {{ paperless_database_filesystem.stdout }}. PostgreSQL must use local
+      storage.
+  vars:
+    paperless_local_filesystems:
+      - btrfs
+      - ext2/ext3
+      - ext4
+      - f2fs
+      - xfs
+      - zfs
+
 - name: Create Paperless Compose project directories
   ansible.builtin.file:
     path: "{{ item }}"

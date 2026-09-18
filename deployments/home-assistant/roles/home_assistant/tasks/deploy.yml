@@ -1,8 +1,9 @@
 ---
-- name: Remove legacy Home Assistant Swarm services before deployment
+- name: Quiesce legacy Home Assistant Swarm services before deployment
   ansible.builtin.include_role:
     name: remove_legacy_swarm_services
   vars:
+    remove_legacy_swarm_services_action: quiesce
     remove_legacy_swarm_services_list:
       - home_assistant_homeassistant
       - home_assistant_zigbee2mqtt
@@ -32,6 +33,10 @@
     owner: '1000'
     group: '1000'
     recurse: true
+
+- name: Record Home Assistant Compose cutover attempt
+  ansible.builtin.set_fact:
+    home_assistant_compose_cutover_attempted: true
 
 - name: Create and start Home Assistant containers
   community.docker.docker_compose_v2:
@@ -72,3 +77,19 @@
          | rejectattr('State', 'equalto', 'running')
          | map(attribute='Service') | unique | list }}
   when: not ansible_check_mode
+
+- name: Record verified Home Assistant Compose cutover
+  ansible.builtin.set_fact:
+    home_assistant_compose_cutover_committed: true
+
+- name: Retire legacy Home Assistant Swarm services
+  ansible.builtin.include_role:
+    name: remove_legacy_swarm_services
+  vars:
+    remove_legacy_swarm_services_action: remove
+    remove_legacy_swarm_services_list:
+      - home_assistant_homeassistant
+      - home_assistant_zigbee2mqtt
+      - home_assistant_matter-server
+      - home_assistant_matter-server-proxy
+      - home_assistant_mqtt

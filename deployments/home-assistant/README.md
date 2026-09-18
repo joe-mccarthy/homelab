@@ -91,7 +91,10 @@ The deployment:
 8. Runs `docker compose up` with forced recreation and waits for all four containers without another registry request.
 9. Fails unless every expected service is running.
 
-Only the known Home Assistant Swarm services and the five container names `homeassistant`, `zigbee2mqtt`, `matter-server`, `mqtt`, and the obsolete `matter-server-proxy` are removed. The role does not broadly prune unrelated services or containers.
+Known Home Assistant Swarm services are first scaled to zero and retained during
+replacement startup. They are retired only after every Compose service is
+running; a failed stateful cutover leaves those definitions quiesced for an
+operator-controlled rollback. The role does not prune unrelated resources.
 
 ## Configuration
 

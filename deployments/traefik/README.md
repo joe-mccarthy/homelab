@@ -44,11 +44,15 @@ The deployment uses one Traefik role with five ordered task files:
 | Filesystem | [`filesystem.yml`](roles/traefik/tasks/filesystem.yml) | Creates parent directories, persistent data, logs, ACME storage, Compose, and secret paths with their required ownership and modes. |
 | Prepare | [`prepare.yml`](roles/traefik/tasks/prepare.yml) | Ensures Docker is running, writes secrets, and renders and validates the Compose project. |
 | Pull | [`pull.yml`](roles/traefik/tasks/pull.yml) | Pulls the pinned Traefik image before the existing proxy is interrupted. |
-| Deploy | [`deploy.yml`](roles/traefik/tasks/deploy.yml) | Removes the legacy Swarm service and old container, starts the replacement, and verifies that it is running. |
+| Deploy | [`deploy.yml`](roles/traefik/tasks/deploy.yml) | Quiesces the legacy Swarm service, starts and verifies Compose, then retires the legacy definition. |
 
 [`roles/traefik/tasks/main.yml`](roles/traefik/tasks/main.yml) imports these files in deployment order. The top-level playbook includes only the `traefik` role.
 
-The role removes the legacy `traefik_traefik` Swarm service and the fixed container name `traefik`; it does not prune unrelated services or containers. The external `proxy` network and other workloads attached to it remain intact during Traefik recreation.
+The role retains the legacy `traefik_traefik` definition at zero replicas during
+cutover and temporarily releases its published ports. It retires that definition
+only after verification; a failed replacement is stopped and the legacy service
+and ports are restored. Unrelated resources and the external `proxy` network
+remain intact.
 
 ## Configuration
 

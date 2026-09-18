@@ -239,8 +239,29 @@
     cmd: /usr/local/sbin/nfs-backup-job verify
   register: deploy_backup_repository_check
   changed_when: false
+  failed_when: deploy_backup_repository_check.rc not in [0, 10]
   environment:
     NFS_BACKUP_MAINTENANCE: "1"
+
+- name: Preserve fresh installation artifacts needed for initialization
+  ansible.builtin.set_fact:
+    deploy_backup_preserve_initialization_artifacts: true
+  when:
+    - deploy_backup_fresh_install | bool
+    - >-
+      deploy_backup_repository_check.rc == 10
+      or (
+        deploy_backup_repository_check.stdout |
+        regex_findall('(?m)^[0-9a-f]{8}[ ]') | length == 0
+      )
+
+- name: Require manual initialization of a new repository
+  ansible.builtin.fail:
+    msg: >-
+      The configured Restic repository does not exist. Timers remain disabled;
+      verify the repository URL, initialize it with nfs-backup-job, create the
+      first backup, and rerun this playbook.
+  when: deploy_backup_repository_check.rc == 10
 
 # Opening any Restic repository is not enough: it could be the wrong repository.
 # Require an existing snapshot created for host `nfs-backup`, source path

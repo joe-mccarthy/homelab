@@ -62,7 +62,10 @@ Before the first Compose start:
 
 The play requires the existing PostgreSQL `PG_VERSION` file and all six Immich `.immich` media markers before deployment. These checks prevent a wrong path from becoming a fresh, empty installation.
 
-During migration, the deployment removes the four known legacy `immich_*` Swarm services. It does not prune unrelated services, stacks, or overlay networks.
+During migration, the four known legacy `immich_*` Swarm services are scaled to
+zero and retained until the Compose replacement is verified. A failed stateful
+cutover leaves those definitions quiesced for operator-controlled recovery.
+Unrelated services, stacks, and overlay networks are not pruned.
 
 ## Configuration
 

@@ -12,4 +12,28 @@
   ansible.builtin.import_tasks: pull.yml
 
 - name: Run Home Assistant deployment stage
-  ansible.builtin.import_tasks: deploy.yml
+  block:
+    - name: Deploy Home Assistant replacement
+      ansible.builtin.import_tasks: deploy.yml
+  rescue:
+    - name: Stop an unverified Home Assistant replacement
+      community.docker.docker_compose_v2:
+        project_src: "{{ home_assistant.compose_dir }}"
+        project_name: home_assistant
+        state: absent
+        remove_orphans: true
+      failed_when: false
+      when:
+        - home_assistant_compose_cutover_attempted | default(false) | bool
+        - not (home_assistant_compose_cutover_committed | default(false) | bool)
+
+    - name: Report preserved Home Assistant rollback point
+      ansible.builtin.fail:
+        msg: >-
+          Home Assistant cutover failed. {{
+            (home_assistant_compose_cutover_committed | default(false) | bool) |
+            ternary(
+              'The verified Compose replacement remains active; legacy retirement must be retried.',
+              'Any unverified Compose replacement was stopped; legacy definitions remain available for recovery.'
+            )
+          }}

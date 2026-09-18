@@ -12,4 +12,28 @@
   ansible.builtin.import_tasks: pull.yml
 
 - name: Deploy Paperless
-  ansible.builtin.import_tasks: deploy.yml
+  block:
+    - name: Deploy Paperless replacement
+      ansible.builtin.import_tasks: deploy.yml
+  rescue:
+    - name: Stop an unverified Paperless replacement
+      community.docker.docker_compose_v2:
+        project_src: "{{ paperless.compose_dir }}"
+        project_name: paperless
+        state: absent
+        remove_orphans: true
+      failed_when: false
+      when:
+        - paperless_compose_cutover_attempted | default(false) | bool
+        - not (paperless_compose_cutover_committed | default(false) | bool)
+
+    - name: Report preserved Paperless rollback point
+      ansible.builtin.fail:
+        msg: >-
+          Paperless cutover failed. {{
+            (paperless_compose_cutover_committed | default(false) | bool) |
+            ternary(
+              'The verified Compose replacement remains active; legacy retirement must be retried.',
+              'Any unverified Compose replacement was stopped; legacy definitions remain available for recovery.'
+            )
+          }}

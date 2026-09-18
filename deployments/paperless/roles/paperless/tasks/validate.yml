@@ -22,34 +22,40 @@
     path: "{{ paperless.data_dir }}/export/manifest.json"
   register: paperless_legacy_export_manifest
 
-- name: Require legacy SQLite export before PostgreSQL cutover
-  ansible.builtin.assert:
-    that:
-      - not paperless_legacy_sqlite_database.stat.exists
-      - >-
-        not (paperless_legacy_export_manifest.stat.exists | default(false))
-        or (paperless.sqlite_migration | bool)
-      - >-
-        not (paperless.sqlite_migration | bool)
-        or (paperless.allow_fresh_install | bool)
-      - >-
-        not (paperless.sqlite_migration | bool)
-        or (
-          (paperless_legacy_export_manifest.stat.isreg | default(false))
-          and (paperless_legacy_export_manifest.stat.size | default(0) | int > 0)
-        )
-    fail_msg: >-
-      PostgreSQL cutover requires the documented SQLite export/import workflow.
-      Archive {{ paperless.data_dir }}/data/db.sqlite3, retain a non-empty
-      export/manifest.json, and set both paperless_sqlite_migration=true and
-      paperless_allow_fresh_install=true for the migration deployment.
-
 - name: Inspect the existing Paperless PostgreSQL cluster
   ansible.builtin.stat:
     path: >-
       {{ paperless.database.data_dir }}/{{ paperless.database.major_version
       }}/docker/PG_VERSION
   register: paperless_database_version
+
+- name: Require safe Paperless database initialization or migration
+  ansible.builtin.assert:
+    that:
+      - not paperless_legacy_sqlite_database.stat.exists
+      - >-
+        (
+          (paperless_database_version.stat.isreg | default(false))
+          and (paperless_database_version.stat.size | default(0) | int > 0)
+        )
+        or (
+          (paperless.allow_fresh_install | bool)
+          and (
+            (
+              not (paperless.sqlite_migration | bool)
+              and not (paperless_legacy_export_manifest.stat.exists | default(false))
+            )
+            or (
+              (paperless.sqlite_migration | bool)
+              and (paperless_legacy_export_manifest.stat.isreg | default(false))
+              and (paperless_legacy_export_manifest.stat.size | default(0) | int > 0)
+            )
+          )
+        )
+    fail_msg: >-
+      PostgreSQL cutover requires either an initialized cluster, a true fresh
+      install with no retained export, or the documented SQLite migration with
+      a non-empty export manifest and both migration flags enabled.
 
 - name: Require the existing Paperless PostgreSQL cluster
   ansible.builtin.assert:

@@ -49,6 +49,14 @@
         label: "{{ item.path }}"
       register: deploy_backup_original_files
 
+    - name: Record whether this is a fresh backup scheduler installation
+      ansible.builtin.set_fact:
+        deploy_backup_fresh_install: >-
+          {{
+            deploy_backup_original_files.results |
+            selectattr('stat.exists') | list | length == 0
+          }}
+
     - name: Record backup timer enablement before deployment
       ansible.builtin.command:
         argv:
@@ -205,6 +213,19 @@
           failed_when: false
           when: deploy_backup_maintenance_lock is defined
 
+        - name: Restore quiesced legacy backup schedules
+          ansible.builtin.include_role:
+            name: remove_legacy_swarm_services
+          vars:
+            remove_legacy_swarm_services_action: restore
+            remove_legacy_swarm_services_list:
+              - nfs_backup_restic_backup
+              - nfs_backup_restic_prune
+              - nfs_backup_restic_check
+          when:
+            - deploy_backup_legacy_scheduler_quiesced | default(false) | bool
+            - not (deploy_backup_scheduler_activated | default(false) | bool)
+
         - name: Stop replacement backup timers
           ansible.builtin.systemd:
             name: "nfs-backup-{{ item }}.timer"
@@ -245,6 +266,11 @@
           when:
             - not item.stat.exists
             - not (deploy_backup_scheduler_activated | default(false) | bool)
+            - >-
+              not (
+                deploy_backup_preserve_initialization_artifacts |
+                default(false) | bool
+              )
 
         - name: Reload restored systemd units
           ansible.builtin.systemd:
@@ -288,6 +314,13 @@
                 (deploy_backup_scheduler_activated | default(false) | bool) |
                 ternary(
                   'The validated replacement scheduler remains active; retry legacy Swarm cleanup.',
-                  'Managed files and the previous timer enablement state were restored.'
+                  (
+                    deploy_backup_preserve_initialization_artifacts |
+                    default(false) | bool
+                  ) |
+                  ternary(
+                    'The repository needs initialization. Installed artifacts were retained with timers disabled.',
+                    'Managed files and the previous timer enablement state were restored.'
+                  )
                 )
               }}

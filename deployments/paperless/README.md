@@ -69,9 +69,16 @@ role refuses the cutover until the following migration is complete:
    documents, tags, correspondents, and document counts before retiring the
    SQLite backup.
 
+Use both flags only for the first deployment that initializes PostgreSQL from
+the SQLite export. Retain the export as a backup, but omit both flags on later
+deployments; an initialized PostgreSQL cluster takes precedence over it.
+
 The Compose settings retain automatic OCR, archive generation, and duplicate rejection. Tika remains on the latest release pinned by Paperless upstream because Tika 4 is not yet the supported conversion image.
 
-During migration, the deployment removes the four known legacy `paperless_*` Swarm services. It does not prune unrelated services, stacks, or overlay networks.
+During migration, the four known legacy `paperless_*` Swarm services are scaled
+to zero and retained until the Compose replacement and conversion services are
+verified. A failed stateful cutover leaves those definitions quiesced for
+operator-controlled recovery. Unrelated Swarm resources are not pruned.
 
 ## Configuration
 

@@ -11,10 +11,6 @@ vault:
   shared:
     general:
       domain: "example.com"
-    registry:
-      user: ""
-      password: ""
-      url: ""
     cloudflare:
       token: ""
       email: ""

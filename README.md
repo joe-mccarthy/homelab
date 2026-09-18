@@ -8,7 +8,7 @@
 
 An Ansible-powered Raspberry Pi home lab for running and maintaining self-hosted services with Docker Compose.
 
-This repository contains the playbooks, roles, templates, and documentation I use to bootstrap machines, deploy services, manage local persistent storage, schedule backups, and keep the hosts healthy. It is built for learning and experimentation, but it is structured like real infrastructure so it stays repeatable instead of becoming a pile of one-off shell commands.
+This repository contains the playbooks, roles, templates, and documentation I use to bootstrap machines, deploy services, manage local persistent storage, and schedule backups. It is built for learning and experimentation, but it is structured like real infrastructure so it stays repeatable instead of becoming a pile of one-off shell commands.
 
 > [!WARNING]
 > This repository is intended for home lab, learning, testing, and development use. Review every variable, secret, network rule, and exposed service before adapting anything for a public or production environment.
@@ -18,11 +18,11 @@ This repository contains the playbooks, roles, templates, and documentation I us
 ## ✨ What This Lab Does
 
 - 🐳 Installs Docker Engine and runs services with [Docker Compose](https://docs.docker.com/compose/) on standalone hosts.
-- 🤖 Uses [Ansible](https://docs.ansible.com/ansible/latest/index.html) for repeatable provisioning, deployment, and maintenance.
+- 🤖 Uses [Ansible](https://docs.ansible.com/ansible/latest/index.html) for repeatable host provisioning and service deployment.
 - 💾 Keeps application data in local persistent directories and backs it up with Restic.
 - 🌐 Routes services through [Traefik](https://doc.traefik.io/traefik/) with domain-based access and HTTPS.
 - 🔐 Keeps sensitive values in [Ansible Vault](https://docs.ansible.com/ansible/latest/vault_guide/index.html).
-- 🧰 Includes ready-to-run deployments for self-hosted apps, backups, automation, and host maintenance.
+- 🧰 Includes ready-to-run deployments for self-hosted apps, backups, and host bootstrapping.
 
 ---
 
@@ -32,8 +32,6 @@ This repository contains the playbooks, roles, templates, and documentation I us
 | --- | --- |
 | [`home_server/`](home_server/README.md) | Bootstrap standalone Docker hosts, local storage roots, and the proxy bridge network. |
 | [`deployments/`](deployments/README.md) | Service deployments, Docker Compose templates, roles, and per-service docs. |
-| [`maintenance/`](maintenance/README.md) | Operational playbooks for updates, setup, shutdown, restarts, and Docker registry login. |
-| [`inventory.example.yml`](inventory.example.yml) | Example Ansible inventory for the application host and additional machines managed by maintenance playbooks. |
 | [`vault.template.yml`](vault.template.yml) | Complete reference for expected secret values. |
 | [`requirements.yml`](requirements.yml) | Required Ansible collections. |
 
@@ -50,24 +48,17 @@ The lab uses Raspberry Pi hosts running Debian or Ubuntu. Applications run with 
 - PoE HATs for the Raspberry Pi 4 nodes.
 - An 8-port PoE switch for power and networking.
 
-### Inventory Groups
+### Deployment Targets
 
-The example inventory uses two Ansible groups:
+The bootstrap and application deployment playbooks select a host with `-e target=<host-or-address>`. A reachable DNS name or IP address can be used directly, with `-u <ssh-user>` for the connection account. Pass your own inventory with `-i inventory.yml` when using inventory aliases or host-specific settings.
 
-| Group | Role |
-| --- | --- |
-| `nfs_servers` | The single application-data host used by core deployments and NFS Backup. |
-| `cluster` | All hosts managed together by the maintenance playbooks. |
-
-The `nfs_servers` group sits under `cluster`, alongside additional standalone hosts. Individual application deployments select a host with `-e target=<host-or-address>`.
-
-In the sample setup, `odin` hosts the applications and local data. The Raspberry Pi 5 is a natural fit because its NVMe drive gives services durable storage without hammering SD cards. The other inventory hosts can be managed through the same maintenance playbooks.
+NFS Backup requires an inventory defining exactly one host in `nfs_servers`. See its [host and inventory instructions](deployments/nfs-backup/README.md#host-and-inventory) for the required structure.
 
 ---
 
 ## 🚀 Quick Start
 
-These commands assume you are running from the root of this repository and have already installed an operating system on each node.
+These commands assume you are running from the root of this repository and have already installed an operating system on the target host. Replace `192.168.1.50` and `pi` with its address and SSH user.
 
 ### 1. Install Ansible Collections
 
@@ -75,15 +66,7 @@ These commands assume you are running from the root of this repository and have 
 ansible-galaxy collection install -r requirements.yml
 ```
 
-### 2. Create Your Inventory
-
-```bash
-cp inventory.example.yml inventory.yml
-```
-
-Edit `inventory.yml` with your hostnames, IP addresses, and SSH users. Put the host used by core deployments and backups in `nfs_servers`.
-
-### 3. Create and Encrypt Your Vault
+### 2. Create and Encrypt Your Vault
 
 ```bash
 cp vault.template.yml vault.yml
@@ -93,37 +76,28 @@ ansible-vault encrypt vault.yml
 
 The vault template documents every secret expected by the deployment stack, including Cloudflare credentials, registry credentials, service passwords, backup keys, and application-specific values.
 
-### 4. Generate a Home Lab SSH Key
+### 3. Bootstrap the Docker Host
+
+The target must be reachable over SSH with a sudo-capable account. Add `--ask-pass` if password authentication is required.
 
 ```bash
-ssh-keygen -t rsa -b 4096 -C "your_email@example.com" -f ~/.ssh/homelab
-```
-
-### 5. Prepare the Machines
-
-```bash
-ansible-playbook -i inventory.yml maintenance/set-up-machine/setup.yml --ask-pass --ask-become-pass
-```
-
-This bootstraps new nodes with SSH access, package updates, common tools, and any required reboot.
-
-### 6. Bootstrap the Docker Host
-
-```bash
-ansible-playbook -i inventory.yml home_server/setup.yml \
-  -e target=odin --extra-vars @vault.yml --ask-vault-pass --ask-become-pass
+ansible-playbook home_server/setup.yml \
+  -e target=192.168.1.50 -u pi \
+  --extra-vars @vault.yml --ask-vault-pass --ask-become-pass
 ```
 
 This installs Docker Engine and the Compose plugin, configures the Docker daemon, creates local storage roots and the `proxy` bridge, and logs in to configured registries. See the [home-server bootstrap guide](home_server/README.md) for details.
 
-### 7. Deploy the Core Services
+### 4. Deploy Routing and DNS
 
 ```bash
-ansible-playbook -i inventory.yml deployments/core-deployments/deploy.yml \
-  --extra-vars @vault.yml --ask-vault-pass
+ansible-playbook deployments/traefik/deploy.yml \
+  -e target=192.168.1.50 -u pi --extra-vars @vault.yml --ask-vault-pass
+ansible-playbook deployments/ddns/deploy.yml \
+  -e target=192.168.1.50 -u pi --extra-vars @vault.yml --ask-vault-pass
 ```
 
-The core deployment brings up Traefik, DDNS, and scheduled backups on the `nfs_servers` host. See the [NFS Backup guide](deployments/nfs-backup/README.md) for initial repository setup.
+Deploy Traefik before the web applications so HTTPS routing is available. Configure scheduled backups separately using the [NFS Backup guide](deployments/nfs-backup/README.md), including its inventory and repository setup instructions.
 
 ---
 
@@ -141,18 +115,18 @@ The full service catalog lives in [`deployments/README.md`](deployments/README.m
 | [Omni Tools](deployments/omni/README.md) | Self-hosted everyday browser utilities. |
 | [NFS Backup](deployments/nfs-backup/README.md) | Restic-based backups for local application data. |
 
-To deploy a single service:
+To deploy an application:
 
 ```bash
-ansible-playbook -i inventory.yml deployments/<service>/deploy.yml \
-  -e target=<host-or-address> --extra-vars @vault.yml --ask-vault-pass
+ansible-playbook deployments/<service>/deploy.yml \
+  -e target=<host-or-address> -u <ssh-user> --extra-vars @vault.yml --ask-vault-pass
 ```
 
 For example:
 
 ```bash
-ansible-playbook -i inventory.yml deployments/immich/deploy.yml \
-  -e target=odin --extra-vars @vault.yml --ask-vault-pass
+ansible-playbook deployments/immich/deploy.yml \
+  -e target=192.168.1.50 -u pi --extra-vars @vault.yml --ask-vault-pass
 ```
 
 ---
@@ -177,28 +151,6 @@ vault:
 ```
 
 You can keep the domain in `vault.yml`, put it in `inventory.yml`, or encrypt it as an individual vault string. Prefer the smallest amount of plain-text configuration that still keeps your workflow practical.
-
----
-
-## 🛠️ Day-to-Day Operations
-
-### Update Every Node
-
-```bash
-ansible-playbook -i inventory.yml maintenance/update.yml --ask-become-pass
-```
-
-### Log Into Private Docker Registries
-
-```bash
-ansible-playbook -i inventory.yml maintenance/docker-login/login.yml --ask-vault-pass
-```
-
-### Gracefully Shut Down the Hosts
-
-```bash
-ansible-playbook -i inventory.yml maintenance/shutdown-cluster.yml --ask-become-pass
-```
 
 ---
 

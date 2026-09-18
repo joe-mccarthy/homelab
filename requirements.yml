@@ -1,7 +1,7 @@
 ---
-# This file defines the Ansible collections required for the Docker Swarm playbooks.
+# This file defines the Ansible collections required for the home lab playbooks.
 # Collections are pre-packaged sets of modules, plugins, and roles that extend Ansible's functionality.
-# These collections are essential for managing Docker Swarm, interacting with Docker, and performing system-level tasks.
+# These collections support Docker Compose deployments and host maintenance.
 
 collections:
   # The `ansible.utils` collection provides utility modules and plugins that enhance Ansible's core functionality.
@@ -15,10 +15,9 @@ collections:
 
   # The `ansible.posix` collection provides modules and plugins for managing POSIX-compliant systems.
   # It includes tools for managing users, groups, file permissions, and other system-level tasks.
-  # This collection is critical for configuring Linux-based systems in the cluster.
+  # This collection is used to configure SSH access on the managed hosts.
   - name: ansible.posix
 
-  # The `community.docker` collection provides modules for managing Docker and Docker Swarm.
-  # It includes tools for deploying and managing Docker stacks, containers, networks, and volumes.
-  # This collection is essential for orchestrating services in the Docker Swarm cluster.
+  # The `community.docker` collection provides modules for Docker Engine and Compose.
+  # It manages Compose projects, containers, networks, and registry authentication.
   - name: community.docker

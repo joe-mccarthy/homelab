@@ -1,97 +1,67 @@
 ---
-# Example Ansible inventory for the homelab Docker Swarm cluster.
+# Example Ansible inventory for standalone home lab hosts.
 #
 # Copy this file and populate it with your actual hostnames/IPs.
 # Sensitive values (passwords, tokens, etc.) belong in an Ansible Vault file —
 # see vault.template.yml for the full list of expected vault variables.
 #
 # Usage:
-#   ansible-playbook -i inventory.yml docker-swarm/create.yml --ask-vault-pass
+#   ansible-playbook -i inventory.yml home_server/setup.yml -e target=odin \
+#     --extra-vars @vault.yml --ask-vault-pass --ask-become-pass
 
 all:
   children:
 
     # -------------------------------------------------------------------------
-    # nfs_servers: the node that exports NFS shares to legacy Swarm nodes and
-    # runs the single-host Docker Compose deployments. The IP of this host is
-    # auto-resolved via ansible_default_ipv4.address for legacy NFS mounts.
-    #
-    # odin doubles as the NFS server. All host vars are defined here;
-    # the manager group references the same hostname without repeating them.
+    # nfs_servers: the single host used by the core deployment and NFS Backup
+    # playbooks. Application data lives locally under /exports/docker.
+    # Individual Compose deployments select their host with -e target=...
     # -------------------------------------------------------------------------
     nfs_servers:
       hosts:
         odin:
           ansible_host: 192.168.1.11
           ansible_user: pi
-          swarm_labels:
-            storage: "true"
 
     # -------------------------------------------------------------------------
-    # cluster: parent group that encompasses every Swarm node.
-    # The maintenance playbooks (restart-cluster, shutdown-cluster) target this.
+    # cluster: all hosts managed by the maintenance playbooks, including the
+    # application host above and any additional standalone machines.
     # -------------------------------------------------------------------------
     cluster:
       children:
+        nfs_servers: {}
+      hosts:
+        thor:
+          ansible_host: 192.168.1.12
+          ansible_user: pi
 
-        # manager: Docker Swarm manager nodes.
-        # Three managers provides fault tolerance (quorum requires 2 of 3).
-        # odin is the init node and the delegation target for label
-        # assignment — this hostname must match exactly what is set here.
-        # odin is defined in nfs_servers above; referenced here by name only.
-        manager:
-          hosts:
-            odin:  # vars defined in nfs_servers above
+        loki:
+          ansible_host: 192.168.1.13
+          ansible_user: pi
 
-            thor:
-              ansible_host: 192.168.1.12
-              ansible_user: pi
-              swarm_labels: {}
+        freyr:
+          ansible_host: 192.168.1.21
+          ansible_user: pi
 
-            loki:
-              ansible_host: 192.168.1.13
-              ansible_user: pi
-              swarm_labels: {}
+        tyr:
+          ansible_host: 192.168.1.22
+          ansible_user: pi
 
-        # docker: Swarm worker nodes.
-        # Add or remove hosts here to scale the cluster.
-        docker:
-          hosts:
-            freyr:
-              ansible_host: 192.168.1.21
-              ansible_user: pi
-              swarm_labels:
-                workload: "true"
+        heimdall:
+          ansible_host: 192.168.1.23
+          ansible_user: pi
 
-            tyr:
-              ansible_host: 192.168.1.22
-              ansible_user: pi
-              swarm_labels:
-                workload: "true"
+        baldur:
+          ansible_host: 192.168.1.24
+          ansible_user: pi
 
-            heimdall:
-              ansible_host: 192.168.1.23
-              ansible_user: pi
-              swarm_labels:
-                workload: "true"
+        frigg:
+          ansible_host: 192.168.1.25
+          ansible_user: pi
 
-            baldur:
-              ansible_host: 192.168.1.24
-              ansible_user: pi
-              swarm_labels:
-                workload: "true"
-
-            frigg:
-              ansible_host: 192.168.1.25
-              ansible_user: pi
-              swarm_labels:
-                workload: "true"
-
-            skadi:
-              ansible_host: 192.168.1.26
-              ansible_user: pi
-              swarm_labels:
-                workload: "true"
+        skadi:
+          ansible_host: 192.168.1.26
+          ansible_user: pi
 
   # ---------------------------------------------------------------------------
   # Variables applied to every host in the inventory.

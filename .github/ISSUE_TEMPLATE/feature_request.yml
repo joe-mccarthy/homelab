@@ -25,7 +25,7 @@ body:
     attributes:
       label: "Area"
       options:
-        - "Docker Swarm"
+        - "Home server setup"
         - "Deployment"
         - "Maintenance"
         - "Documentation"

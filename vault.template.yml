@@ -19,9 +19,6 @@ vault:
       token: ""
       email: ""
 
-  docker_swarm:
-    nfs_restriction: ""
-
   services:
     ddns:
       dns_domains: ""

@@ -219,58 +219,22 @@
         name: "{{ home_server_proxy_network }}"
       register: home_server_proxy_network_info
 
-    - name: Inspect Docker runtime mode
-      ansible.builtin.command:
-        argv:
-          - docker
-          - info
-          - --format
-          - json
-      register: home_server_docker_info
-      changed_when: false
-
-    - name: Record whether Docker Swarm is active
-      ansible.builtin.set_fact:
-        home_server_swarm_active: >-
-          {{ (home_server_docker_info.stdout | from_json).Swarm.LocalNodeState
-             == 'active' }}
-
-    - name: Require a manager for a Swarm migration target
-      ansible.builtin.assert:
-        that:
-          - >-
-            not home_server_swarm_active
-            or (home_server_docker_info.stdout | from_json).Swarm.ControlAvailable
-        fail_msg: >-
-          Compose migration on a Swarm-active host requires a manager so legacy
-          services and Traefik's Swarm provider remain manageable.
-
     - name: Require a compatible existing proxy network
       ansible.builtin.assert:
         that:
           - >-
             not home_server_proxy_network_info.exists
             or (
-              home_server_swarm_active
-              and home_server_proxy_network_info.network.Scope == 'swarm'
-              and home_server_proxy_network_info.network.Driver == 'overlay'
-              and home_server_proxy_network_info.network.Attachable
-            )
-            or (
-              not home_server_swarm_active
-              and home_server_proxy_network_info.network.Scope == 'local'
+              home_server_proxy_network_info.network.Scope == 'local'
               and home_server_proxy_network_info.network.Driver == 'bridge'
             )
         fail_msg: >-
-          {{ home_server_proxy_network }} must be an attachable overlay on a
-          Swarm manager or a local bridge when Swarm is inactive. Recreate an
-          incompatible network during a maintenance window.
+          {{ home_server_proxy_network }} must be a local Docker bridge network.
 
     - name: Create shared reverse proxy network when absent
       community.docker.docker_network:
         name: "{{ home_server_proxy_network }}"
-        driver: "{{ home_server_swarm_active | ternary('overlay', 'bridge') }}"
-        attachable: "{{ home_server_swarm_active }}"
+        driver: bridge
         state: present
       when: not home_server_proxy_network_info.exists
 

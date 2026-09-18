@@ -6,9 +6,9 @@
 [![License](https://img.shields.io/github/license/joe-mccarthy/homelab?style=flat-square)](LICENSE)
 [![ansible-lint](https://img.shields.io/github/actions/workflow/status/joe-mccarthy/homelab/ansible-linter.yml?style=flat-square&label=ansible%20lint)](https://github.com/joe-mccarthy/homelab/actions/workflows/ansible-linter.yml)
 
-An Ansible-powered Raspberry Pi home lab for building, running, and maintaining a small Docker Swarm cluster.
+An Ansible-powered Raspberry Pi home lab for running and maintaining self-hosted services with Docker Compose.
 
-This repository contains the playbooks, roles, templates, and documentation I use to bootstrap machines, create a Swarm, deploy services, manage persistent storage, and keep the cluster healthy. It is built for learning and experimentation, but it is structured like real infrastructure so it stays repeatable instead of becoming a pile of one-off shell commands.
+This repository contains the playbooks, roles, templates, and documentation I use to bootstrap machines, deploy services, manage local persistent storage, schedule backups, and keep the hosts healthy. It is built for learning and experimentation, but it is structured like real infrastructure so it stays repeatable instead of becoming a pile of one-off shell commands.
 
 > [!WARNING]
 > This repository is intended for home lab, learning, testing, and development use. Review every variable, secret, network rule, and exposed service before adapting anything for a public or production environment.
@@ -17,12 +17,12 @@ This repository contains the playbooks, roles, templates, and documentation I us
 
 ## ✨ What This Lab Does
 
-- 🐳 Creates and manages a multi-node [Docker Swarm](https://docs.docker.com/engine/swarm/) cluster.
+- 🐳 Installs Docker Engine and runs services with [Docker Compose](https://docs.docker.com/compose/) on standalone hosts.
 - 🤖 Uses [Ansible](https://docs.ansible.com/ansible/latest/index.html) for repeatable provisioning, deployment, and maintenance.
-- 💾 Provides shared persistent storage through [NFS](https://en.wikipedia.org/wiki/Network_File_System).
+- 💾 Keeps application data in local persistent directories and backs it up with Restic.
 - 🌐 Routes services through [Traefik](https://doc.traefik.io/traefik/) with domain-based access and HTTPS.
 - 🔐 Keeps sensitive values in [Ansible Vault](https://docs.ansible.com/ansible/latest/vault_guide/index.html).
-- 🧰 Includes ready-to-run deployments for self-hosted apps, backups, automation, and cluster operations.
+- 🧰 Includes ready-to-run deployments for self-hosted apps, backups, automation, and host maintenance.
 
 ---
 
@@ -30,10 +30,10 @@ This repository contains the playbooks, roles, templates, and documentation I us
 
 | Path | Purpose |
 | --- | --- |
-| [`docker-swarm/`](docker-swarm/README.md) | Create, manage, and destroy the Docker Swarm cluster. |
+| [`home_server/`](home_server/README.md) | Bootstrap standalone Docker hosts, local storage roots, and the proxy bridge network. |
 | [`deployments/`](deployments/README.md) | Service deployments, Docker Compose templates, roles, and per-service docs. |
 | [`maintenance/`](maintenance/README.md) | Operational playbooks for updates, setup, shutdown, restarts, and Docker registry login. |
-| [`inventory.example.yml`](inventory.example.yml) | Example Ansible inventory for managers, workers, and the NFS host. |
+| [`inventory.example.yml`](inventory.example.yml) | Example Ansible inventory for the application host and additional machines managed by maintenance playbooks. |
 | [`vault.template.yml`](vault.template.yml) | Complete reference for expected secret values. |
 | [`requirements.yml`](requirements.yml) | Required Ansible collections. |
 
@@ -41,7 +41,7 @@ This repository contains the playbooks, roles, templates, and documentation I us
 
 ## 🧱 Architecture
 
-The lab is designed around Raspberry Pi nodes running Ubuntu and participating in a Docker Swarm.
+The lab uses Raspberry Pi hosts running Debian or Ubuntu. Applications run with Docker Compose on a selected host, with Traefik routing web traffic over a local `proxy` bridge network. Persistent application data lives under `/exports/docker`, and Compose projects are retained beneath `/opt`.
 
 ### Current Hardware
 
@@ -50,22 +50,18 @@ The lab is designed around Raspberry Pi nodes running Ubuntu and participating i
 - PoE HATs for the Raspberry Pi 4 nodes.
 - An 8-port PoE switch for power and networking.
 
-### Cluster Shape
+### Inventory Groups
 
-The example inventory models the cluster with three Ansible groups:
+The example inventory uses two Ansible groups:
 
 | Group | Role |
 | --- | --- |
-| `nfs_servers` | Hosts the NFS export used for persistent Docker volumes. |
-| `manager` | Docker Swarm manager nodes. |
-| `docker` | Docker Swarm worker nodes. |
+| `nfs_servers` | The single application-data host used by core deployments and NFS Backup. |
+| `cluster` | All hosts managed together by the maintenance playbooks. |
 
-Both `manager` and `docker` sit under the `cluster` group so maintenance playbooks can target every node together.
+The `nfs_servers` group sits under `cluster`, alongside additional standalone hosts. Individual application deployments select a host with `-e target=<host-or-address>`.
 
-In the sample setup, `odin` acts as the first manager and NFS server, `thor` and `loki` are additional managers, and the remaining nodes are workers. The Raspberry Pi 5 is the natural fit for NFS because the NVMe drive gives services durable storage without hammering SD cards.
-
-> [!TIP]
-> Use an odd number of Swarm managers. A cluster with `N` managers can tolerate the loss of at most `(N - 1) / 2` managers, and Docker recommends no more than seven manager nodes.
+In the sample setup, `odin` hosts the applications and local data. The Raspberry Pi 5 is a natural fit because its NVMe drive gives services durable storage without hammering SD cards. The other inventory hosts can be managed through the same maintenance playbooks.
 
 ---
 
@@ -85,7 +81,7 @@ ansible-galaxy collection install -r requirements.yml
 cp inventory.example.yml inventory.yml
 ```
 
-Edit `inventory.yml` with your node names, IP addresses, SSH users, and Swarm labels.
+Edit `inventory.yml` with your hostnames, IP addresses, and SSH users. Put the host used by core deployments and backups in `nfs_servers`.
 
 ### 3. Create and Encrypt Your Vault
 
@@ -97,7 +93,7 @@ ansible-vault encrypt vault.yml
 
 The vault template documents every secret expected by the deployment stack, including Cloudflare credentials, registry credentials, service passwords, backup keys, and application-specific values.
 
-### 4. Generate a Cluster SSH Key
+### 4. Generate a Home Lab SSH Key
 
 ```bash
 ssh-keygen -t rsa -b 4096 -C "your_email@example.com" -f ~/.ssh/homelab
@@ -111,13 +107,14 @@ ansible-playbook -i inventory.yml maintenance/set-up-machine/setup.yml --ask-pas
 
 This bootstraps new nodes with SSH access, package updates, common tools, and any required reboot.
 
-### 6. Create the Swarm
+### 6. Bootstrap the Docker Host
 
 ```bash
-ansible-playbook -i inventory.yml docker-swarm/create.yml --ask-vault-pass
+ansible-playbook -i inventory.yml home_server/setup.yml \
+  -e target=odin --extra-vars @vault.yml --ask-vault-pass --ask-become-pass
 ```
 
-This installs Docker, configures NFS, initializes the Swarm, joins managers and workers, applies labels, and creates the shared proxy network.
+This installs Docker Engine and the Compose plugin, configures the Docker daemon, creates local storage roots and the `proxy` bridge, and logs in to configured registries. See the [home-server bootstrap guide](home_server/README.md) for details.
 
 ### 7. Deploy the Core Services
 
@@ -126,7 +123,7 @@ ansible-playbook -i inventory.yml deployments/core-deployments/deploy.yml \
   --extra-vars @vault.yml --ask-vault-pass
 ```
 
-The core deployment brings up the foundation used by the rest of the lab, including routing and DNS support.
+The core deployment brings up Traefik, DDNS, and scheduled backups on the `nfs_servers` host. See the [NFS Backup guide](deployments/nfs-backup/README.md) for initial repository setup.
 
 ---
 
@@ -142,7 +139,7 @@ The full service catalog lives in [`deployments/README.md`](deployments/README.m
 | [Immich](deployments/immich/README.md) | Self-hosted photo and video management. |
 | [Paperless](deployments/paperless/README.md) | Document management and OCR workflow. |
 | [Omni Tools](deployments/omni/README.md) | Self-hosted everyday browser utilities. |
-| [NFS Backup](deployments/nfs-backup/README.md) | Restic-based backups for shared NFS data. |
+| [NFS Backup](deployments/nfs-backup/README.md) | Restic-based backups for local application data. |
 
 To deploy a single service:
 
@@ -197,19 +194,11 @@ ansible-playbook -i inventory.yml maintenance/update.yml --ask-become-pass
 ansible-playbook -i inventory.yml maintenance/docker-login/login.yml --ask-vault-pass
 ```
 
-### Gracefully Shut Down the Cluster
+### Gracefully Shut Down the Hosts
 
 ```bash
 ansible-playbook -i inventory.yml maintenance/shutdown-cluster.yml --ask-become-pass
 ```
-
-### Tear Down the Swarm
-
-```bash
-ansible-playbook -i inventory.yml docker-swarm/destroy.yml --ask-vault-pass
-```
-
-Use destructive playbooks with care. Back up important data first, especially anything under shared NFS volumes.
 
 ---
 
@@ -219,7 +208,7 @@ This lab is intentionally practical:
 
 - Keep infrastructure documented in the same repository as the automation.
 - Prefer repeatable playbooks over manual node-by-node changes.
-- Make services movable by using shared storage and Swarm placement rules.
+- Keep application data in explicit local paths with tested backups.
 - Keep secret material centralized and encrypted.
 - Use the lab as a place to learn real operational patterns without pretending it is production.
 

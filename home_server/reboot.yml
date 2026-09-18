@@ -1,0 +1,43 @@
+---
+- name: Validate home server reboot target
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: Require a target host or address
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target | default('') | string | trim | length > 0
+        fail_msg: >-
+          Pass an inventory hostname, DNS name, or IP address with
+          -e target=<host-or-address>.
+
+    - name: Add target to the temporary reboot group
+      ansible.builtin.add_host:
+        name: "{{ target | string | trim }}"
+        groups: home_server_reboot
+
+- name: Reboot home server
+  hosts: home_server_reboot
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+
+  vars:
+    home_server_reboot_timeout: 600
+
+  tasks:
+    - name: Reboot and wait for the host to return
+      ansible.builtin.reboot:
+        msg: Reboot requested by the home server playbook
+        reboot_timeout: "{{ home_server_reboot_timeout }}"
+        connect_timeout: 10
+      register: home_server_reboot_result
+
+    - name: Report completed reboot
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} is reachable after reboot
+          ({{ home_server_reboot_result.elapsed }} seconds).
+      when: not ansible_check_mode

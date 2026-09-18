@@ -2,5 +2,8 @@
 # Collections required for Docker host bootstrapping and service deployments.
 
 collections:
+  # Persistent mounts for optional application storage provisioning.
+  - name: ansible.posix
+
   # Compose projects, containers, networks, and registry authentication.
   - name: community.docker

@@ -1,0 +1,166 @@
+---
+- name: Validate home server status target
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: Require a target host or address
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target | default('') | string | trim | length > 0
+        fail_msg: >-
+          Pass an inventory hostname, DNS name, or IP address with
+          -e target=<host-or-address>.
+
+    - name: Add target to the temporary status group
+      ansible.builtin.add_host:
+        name: "{{ target | string | trim }}"
+        groups: home_server_status
+
+- name: Report home server status
+  hosts: home_server_status
+  become: true
+  gather_facts: true
+
+  vars:
+    home_server_data_root: /exports/docker
+    home_server_compose_root: /opt
+    home_server_status_paths:
+      - /
+      - "{{ home_server_data_root }}"
+      - "{{ home_server_compose_root }}"
+
+  tasks:
+    - name: Gather host service status
+      ansible.builtin.service_facts:
+
+    - name: Read Docker and Compose versions
+      ansible.builtin.command:
+        argv: "{{ item }}"
+      loop:
+        - [docker, --version]
+        - [docker, compose, version]
+      loop_control:
+        label: "{{ item | join(' ') }}"
+      register: home_server_tool_versions
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Read local container status and health
+      ansible.builtin.command:
+        argv:
+          - docker
+          - --host
+          - unix:///var/run/docker.sock
+          - ps
+          - --all
+          - --format
+          - json
+      register: home_server_containers
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: >-
+        ansible_facts.services.get('docker.service', {}).get('state', '')
+        == 'running'
+
+    - name: Read filesystem usage
+      ansible.builtin.command:
+        argv: >-
+          {{ ['df', '-h', '--output=source,fstype,size,used,avail,pcent,target', '--']
+             + home_server_status_paths }}
+      register: home_server_disk_usage
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Inspect the operating system reboot flag
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: home_server_reboot_flag
+
+    - name: Read backup timer status
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - show
+          - --no-pager
+          - --property=Id
+          - --property=LoadState
+          - --property=ActiveState
+          - --property=SubState
+          - --property=UnitFileState
+          - --property=LastTriggerUSec
+          - --property=NextElapseUSecRealtime
+          - "nfs-backup-{{ item }}.timer"
+      loop:
+        - backup
+        - prune
+        - check
+      register: home_server_backup_timers
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Report host overview
+      ansible.builtin.debug:
+        msg:
+          host: "{{ inventory_hostname }}"
+          operating_system: >-
+            {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }}
+          uptime_seconds: "{{ ansible_facts.uptime_seconds }}"
+          memory_mb: "{{ ansible_facts.memory_mb.real | default({}) }}"
+          docker_service: >-
+            {{ ansible_facts.services.get('docker.service', {'state': 'not-installed'}) }}
+          reboot_required: "{{ home_server_reboot_flag.stat.exists }}"
+          disk_usage: "{{ home_server_disk_usage.stdout_lines | default([]) }}"
+          disk_usage_error: >-
+            {{ home_server_disk_usage.stderr |
+               default(home_server_disk_usage.msg | default(''), true) }}
+
+    - name: Report Docker and Compose versions
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.stdout | default(
+               item.stderr | default(item.msg | default('Unavailable'), true), true) }}
+      loop: "{{ home_server_tool_versions.results }}"
+      loop_control:
+        label: "{{ item.item | join(' ') }}"
+
+    - name: Report container count
+      ansible.builtin.debug:
+        msg: "Found {{ home_server_containers.stdout_lines | default([]) | length }} containers."
+      when: home_server_containers.rc | default(1) == 0
+
+    - name: Report containers
+      ansible.builtin.debug:
+        msg:
+          name: "{{ item.Names }}"
+          image: "{{ item.Image }}"
+          state: "{{ item.State }}"
+          status: "{{ item.Status }}"
+      loop: >-
+        {{ (home_server_containers.stdout_lines | default([]) | map('from_json') | list)
+           if home_server_containers.rc | default(1) == 0 else [] }}
+      loop_control:
+        label: "{{ item.Names }}"
+      when: home_server_containers.rc | default(1) == 0
+
+    - name: Report unavailable container status
+      ansible.builtin.debug:
+        msg: >-
+          {{ home_server_containers.stderr | default(
+               home_server_containers.msg | default('Docker service is not running.'), true) }}
+      when: home_server_containers.rc | default(1) != 0
+
+    - name: Report backup timers
+      ansible.builtin.debug:
+        msg:
+          timer: "nfs-backup-{{ item.item }}.timer"
+          properties: "{{ item.stdout_lines | default([]) }}"
+          error: "{{ item.stderr | default(item.msg | default(''), true) }}"
+      loop: "{{ home_server_backup_timers.results }}"
+      loop_control:
+        label: "nfs-backup-{{ item.item }}.timer"

@@ -1,0 +1,237 @@
+---
+- name: Validate home server storage target
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: Require a target host or address
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target | default('') | string | trim | length > 0
+        fail_msg: >-
+          Pass an inventory hostname, DNS name, or IP address with
+          -e target=<host-or-address>.
+
+    - name: Add target to the temporary storage group
+      ansible.builtin.add_host:
+        name: "{{ target | string | trim }}"
+        groups: home_server_storage
+
+- name: Mount home server application storage
+  hosts: home_server_storage
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+
+  vars:
+    home_server_data_root: /exports/docker
+    home_server_storage_mount_options: defaults
+
+  pre_tasks:
+    - name: Require a supported operating system
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.os_family == 'Debian'
+          - ansible_facts.distribution in ['Debian', 'Ubuntu']
+        fail_msg: This playbook supports Debian and Ubuntu hosts only.
+
+    - name: Validate storage settings
+      ansible.builtin.assert:
+        that:
+          - home_server_storage_uuid | default('') is string
+          - home_server_storage_uuid | default('') is match('^[A-Fa-f0-9]+(-[A-Fa-f0-9]+)*$')
+          - home_server_data_root is string
+          - home_server_data_root is match('^/')
+        fail_msg: >-
+          Pass home_server_storage_uuid from lsblk -f and an absolute
+          home_server_data_root for the application data mount.
+
+  tasks:
+    - name: Resolve the application storage mount path
+      ansible.builtin.command:
+        argv:
+          - realpath
+          - --canonicalize-missing
+          - "{{ home_server_data_root }}"
+      register: home_server_storage_path
+      changed_when: false
+      check_mode: false
+
+    - name: Require an application data mount path
+      ansible.builtin.assert:
+        that:
+          - home_server_storage_path.stdout != '/'
+        fail_msg: The application data mount must not be the root filesystem.
+
+    - name: Inspect the filesystem device
+      ansible.builtin.stat:
+        path: "/dev/disk/by-uuid/{{ home_server_storage_uuid }}"
+        follow: true
+      register: home_server_storage_device
+
+    - name: Require an existing filesystem device
+      ansible.builtin.assert:
+        that:
+          - home_server_storage_device.stat.exists
+          - home_server_storage_device.stat.isblk | default(false)
+        fail_msg: >-
+          UUID {{ home_server_storage_uuid }} must identify an existing local
+          block-device filesystem on {{ inventory_hostname }}.
+
+    - name: Read the existing filesystem type
+      ansible.builtin.command:
+        argv:
+          - blkid
+          - --output
+          - value
+          - --match-tag
+          - TYPE
+          - "/dev/disk/by-uuid/{{ home_server_storage_uuid }}"
+      register: home_server_storage_type
+      changed_when: false
+      check_mode: false
+
+    - name: Require a supported local filesystem
+      ansible.builtin.assert:
+        that:
+          - home_server_storage_type.stdout | trim in home_server_storage_filesystems
+        fail_msg: >-
+          The selected device must contain a supported local filesystem;
+          detected {{ home_server_storage_type.stdout | trim }}.
+      vars:
+        home_server_storage_filesystems:
+          - btrfs
+          - ext2
+          - ext3
+          - ext4
+          - f2fs
+          - xfs
+
+    - name: Inspect the current application storage mount
+      ansible.builtin.command:
+        argv:
+          - findmnt
+          - --json
+          - --mountpoint
+          - "{{ home_server_storage_path.stdout }}"
+          - --output
+          - UUID
+      register: home_server_storage_current_mount
+      changed_when: false
+      failed_when: home_server_storage_current_mount.rc not in [0, 1]
+      check_mode: false
+
+    - name: Require the expected filesystem at an existing mount
+      ansible.builtin.assert:
+        that:
+          - >-
+            home_server_storage_current_mount.rc == 1
+            or (home_server_storage_current_mount.stdout | from_json)
+               .filesystems[0].uuid == home_server_storage_uuid
+        fail_msg: >-
+          {{ home_server_storage_path.stdout }} is already mounted from a
+          different filesystem.
+
+    - name: Inspect other mounts of the selected filesystem
+      ansible.builtin.command:
+        argv:
+          - findmnt
+          - --json
+          - --source
+          - "UUID={{ home_server_storage_uuid }}"
+          - --output
+          - TARGET
+      register: home_server_storage_device_mounts
+      changed_when: false
+      failed_when: home_server_storage_device_mounts.rc not in [0, 1]
+      check_mode: false
+
+    - name: Require the filesystem to use only the requested mount path
+      ansible.builtin.assert:
+        that:
+          - >-
+            home_server_storage_device_mounts.rc == 1
+            or (
+              (home_server_storage_device_mounts.stdout | from_json).filesystems
+              | map(attribute='target')
+              | difference([home_server_storage_path.stdout]) | length == 0
+            )
+        fail_msg: >-
+          UUID {{ home_server_storage_uuid }} is mounted elsewhere. Configure
+          home_server_data_root to use its existing mount path.
+
+    - name: Inspect the application storage directory
+      ansible.builtin.stat:
+        path: "{{ home_server_storage_path.stdout }}"
+      register: home_server_storage_directory
+
+    - name: Require a directory at the application storage path
+      ansible.builtin.assert:
+        that:
+          - >-
+            not home_server_storage_directory.stat.exists
+            or home_server_storage_directory.stat.isdir | default(false)
+        fail_msg: "{{ home_server_storage_path.stdout }} exists but is not a directory."
+
+    - name: Inspect an unmounted application storage directory
+      ansible.builtin.find:
+        paths: "{{ home_server_storage_path.stdout }}"
+        file_type: any
+        hidden: true
+        recurse: false
+      register: home_server_storage_directory_contents
+      when:
+        - home_server_storage_current_mount.rc == 1
+        - home_server_storage_directory.stat.exists
+
+    - name: Require an empty directory before mounting storage
+      ansible.builtin.assert:
+        that:
+          - home_server_storage_directory_contents.skipped_paths | default({}) | length == 0
+          - home_server_storage_directory_contents.matched == 0
+        fail_msg: >-
+          {{ home_server_storage_path.stdout }} must be readable and empty
+          before mounting storage. Move any existing data to the intended
+          filesystem first.
+      when:
+        - home_server_storage_current_mount.rc == 1
+        - home_server_storage_directory.stat.exists
+
+    - name: Create the application storage mount directory
+      ansible.builtin.file:
+        path: "{{ home_server_storage_path.stdout }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      when: home_server_storage_current_mount.rc == 1
+
+    - name: Mount the existing filesystem and persist it in fstab
+      ansible.posix.mount:
+        path: "{{ home_server_storage_path.stdout }}"
+        src: "UUID={{ home_server_storage_uuid }}"
+        fstype: "{{ home_server_storage_type.stdout | trim }}"
+        opts: "{{ home_server_storage_mount_options }}"
+        dump: '0'
+        passno: >-
+          {{ (home_server_storage_type.stdout | trim in ['ext2', 'ext3', 'ext4'])
+             | ternary('2', '0') }}
+        state: mounted
+
+    - name: Verify the mounted filesystem
+      ansible.builtin.command:
+        argv:
+          - findmnt
+          - --json
+          - --mountpoint
+          - "{{ home_server_storage_path.stdout }}"
+          - --output
+          - UUID
+      register: home_server_storage_verified_mount
+      changed_when: false
+      failed_when: >-
+        home_server_storage_verified_mount.rc != 0
+        or (home_server_storage_verified_mount.stdout | from_json)
+           .filesystems[0].uuid != home_server_storage_uuid
+      when: not ansible_check_mode

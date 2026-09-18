@@ -1,0 +1,36 @@
+---
+- name: Ensure Docker Compose plugin is installed
+  ansible.builtin.package:
+    name: docker-compose-plugin
+    state: present
+
+- name: Ensure Docker is enabled and running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Validate Omni Tools proxy network
+  ansible.builtin.include_role:
+    name: validate_proxy_network
+  vars:
+    validate_proxy_network_name: "{{ omni.proxy_network }}"
+
+- name: Render Omni Tools Compose project
+  ansible.builtin.template:
+    src: templates/docker-compose.yaml
+    dest: "{{ omni.compose_dir }}/compose.yaml"
+    mode: '0600'
+    owner: root
+    group: root
+
+- name: Validate rendered Omni Tools Compose project
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --project-directory
+      - "{{ omni.compose_dir }}"
+      - config
+      - --quiet
+  changed_when: false

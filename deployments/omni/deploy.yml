@@ -1,16 +1,30 @@
-# Deploy the Omni stack once from a single manager node.
-- name: Deploy Omni
-  # Target manager nodes because stack deployment is a manager-only operation.
-  hosts: manager
-  order: shuffle
-  become: true
-  vars:
-    # Select one host from the play host list to avoid duplicate stack deploys.
-    omni_deploy_host: "{{ ansible_play_hosts_all | first }}"
+---
+- name: Validate Omni Tools target
+  hosts: localhost
+  gather_facts: false
 
   tasks:
-    # Delegate stack deployment logic to the role, but execute it on one host only.
-    - name: Deploy Omni stack
+    - name: Require an Omni Tools target
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target | default('') | string | trim | length > 0
+        fail_msg: >-
+          Pass an inventory hostname, DNS name, or IP address with
+          -e target=<host-or-address>.
+
+    - name: Add Omni Tools target to the temporary deployment group
+      ansible.builtin.add_host:
+        name: "{{ target | string | trim }}"
+        groups: deployment_target
+
+- name: Deploy Omni Tools
+  hosts: deployment_target
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+
+  tasks:
+    - name: Run staged Omni Tools deployment
       ansible.builtin.include_role:
-        name: deploy
-      when: inventory_hostname == omni_deploy_host
+        name: omni

@@ -1,0 +1,8 @@
+---
+- name: Create Omni Tools Compose project directory
+  ansible.builtin.file:
+    path: "{{ omni.compose_dir }}"
+    state: directory
+    mode: '0700'
+    owner: root
+    group: root

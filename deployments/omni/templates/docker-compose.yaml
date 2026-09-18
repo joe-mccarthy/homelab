@@ -1,46 +1,33 @@
-version: '3.8'
+---
+name: omni
 
 services:
-  # Omni Tools web application exposed through Traefik.
   omni:
-    image: iib0011/omni-tools:latest
+    image: "iib0011/omni-tools:{{ omni.version }}"
     container_name: omni-tools
     restart: unless-stopped
     networks:
-      # Attach to the shared Traefik ingress network.
       proxy:
         aliases:
-          - omni.{{ vault.shared.general.domain }}
-    deploy:
-      # Reduce downtime during image updates.
-      update_config:
-        order: start-first
-      # Keep app workloads on workers; managers handle control-plane duties.
-      placement:
-        constraints: [node.role == worker]
-      mode: replicated
-      replicas: 1
-      labels:
-        # Enable Traefik and expose HTTP for redirect middleware only.
-        - "traefik.enable=true"
-        - "traefik.http.routers.omni.entrypoints=web"
-        - "traefik.http.routers.omni.rule=Host(`omni.{{ vault.shared.general.domain }}`)"
-        - "traefik.http.middlewares.omni-https-redirect.redirectscheme.scheme=https"
-        - "traefik.http.routers.omni.middlewares=omni-https-redirect"
-        # Secure router for real traffic over TLS.
-        - "traefik.http.routers.omni-secure.entrypoints=websecure"
-        - "traefik.http.routers.omni-secure.rule=Host(`omni.{{ vault.shared.general.domain }}`)"
-        - "traefik.http.routers.omni-secure.tls=true"
-        - "traefik.http.routers.omni-secure.service=omni"
-        - "traefik.http.routers.omni-secure.tls.certresolver=letsencrypt"
-        # Forward requests to Omni's internal HTTP listener.
-        - "traefik.http.services.omni.loadbalancer.server.port=80"
-        - "traefik.http.services.omni.loadbalancer.passhostheader=true"
-        - "traefik.docker.network=proxy"
-        # Enables Cioban-driven automated image updates.
-        - "ai.ix.auto-update=true"
+          - "omni.{{ vault.shared.general.domain }}"
+    labels:
+      traefik.enable: 'true'
+      traefik.http.routers.omni.entrypoints: web
+      traefik.http.routers.omni.rule: >-
+        Host(`omni.{{ vault.shared.general.domain }}`)
+      traefik.http.middlewares.omni-https-redirect.redirectscheme.scheme: https
+      traefik.http.routers.omni.middlewares: omni-https-redirect
+      traefik.http.routers.omni-secure.entrypoints: websecure
+      traefik.http.routers.omni-secure.rule: >-
+        Host(`omni.{{ vault.shared.general.domain }}`)
+      traefik.http.routers.omni-secure.tls: 'true'
+      traefik.http.routers.omni-secure.service: omni
+      traefik.http.routers.omni-secure.tls.certresolver: letsencrypt
+      traefik.http.services.omni.loadbalancer.server.port: '80'
+      traefik.http.services.omni.loadbalancer.passhostheader: 'true'
+      traefik.docker.network: "{{ omni.proxy_network }}"
 
 networks:
-  # External network created by Traefik deployment.
   proxy:
     external: true
+    name: "{{ omni.proxy_network }}"

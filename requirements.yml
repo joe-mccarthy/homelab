@@ -1,23 +1,6 @@
 ---
-# This file defines the Ansible collections required for the home lab playbooks.
-# Collections are pre-packaged sets of modules, plugins, and roles that extend Ansible's functionality.
-# These collections support Docker Compose deployments and host maintenance.
+# Collections required for Docker host bootstrapping and service deployments.
 
 collections:
-  # The `ansible.utils` collection provides utility modules and plugins that enhance Ansible's core functionality.
-  # It includes tools for data manipulation, validation, and other general-purpose utilities.
-  - name: ansible.utils
-
-  # The `community.general` collection is a widely-used collection that provides a variety of modules and plugins.
-  # It includes tools for managing files, services, packages, and more across different platforms.
-  # This collection is essential for general system administration tasks.
-  - name: community.general
-
-  # The `ansible.posix` collection provides modules and plugins for managing POSIX-compliant systems.
-  # It includes tools for managing users, groups, file permissions, and other system-level tasks.
-  # This collection is used to configure SSH access on the managed hosts.
-  - name: ansible.posix
-
-  # The `community.docker` collection provides modules for Docker Engine and Compose.
-  # It manages Compose projects, containers, networks, and registry authentication.
+  # Compose projects, containers, networks, and registry authentication.
   - name: community.docker

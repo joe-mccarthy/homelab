@@ -17,22 +17,17 @@ Single-host Compose deployments retain root-owned projects beneath `/opt/<servic
 
 ## Deployments
 
-### 1. [Core Deployments](core-deployments/README.md)
-- **Description**: A collection of foundational services: Traefik, Dynamic DNS, and NFS Backup.
-- **Use Case**: Deploy this playbook first to set up the foundational services for the cluster.
-- **Dependencies**: None, but it is recommended to run this playbook before deploying other services.
-
-### 2. [DDNS](ddns/README.md)
+### 1. [DDNS](ddns/README.md)
 - **Description**: Dynamically updates DNS records to reflect the public IP address of the home lab's internet gateway. This ensures services are accessible via domain names.
 - **Use Case**: Useful for home labs with dynamic IP addresses.
-- **Dependencies**: Runs with Docker Compose on the single `nfs_servers` host and requires a scoped Cloudflare API token. It does not use Traefik.
+- **Dependencies**: Runs with Docker Compose on the target host and requires a scoped Cloudflare API token. It does not use Traefik.
 
-### 3. [Home Assistant](home-assistant/README.md)
+### 2. [Home Assistant](home-assistant/README.md)
 - **Description**: Deploys Home Assistant, an open-source platform for home automation, with Zigbee2MQTT, Mosquitto, and Matter Server for Wi-Fi Matter devices.
 - **Use Case**: Perfect for managing and automating smart home devices.
-- **Dependencies**: Runs with Docker Compose on the single `nfs_servers` host and requires local Traefik proxying, LAN IPv6/mDNS, and a local or TCP-connected Zigbee coordinator.
+- **Dependencies**: Runs with Docker Compose on the target host and requires local Traefik proxying, LAN IPv6/mDNS, and a local or TCP-connected Zigbee coordinator.
 
-### 4. [Immich](immich/README.md)
+### 3. [Immich](immich/README.md)
 - **Description**: Immich is a high-performance self-hosted photo and video management solution that serves as a complete alternative to Google Photos. Features include:
   - Web interface and mobile apps for photo browsing and automatic backup
   - AI-powered features including face recognition and object detection
@@ -46,12 +41,12 @@ Single-host Compose deployments retain root-owned projects beneath `/opt/<servic
 - **Use Case**: Ideal for users looking to manage and organize their photo and video collections with advanced AI capabilities.
 - **Dependencies**: Runs with Docker Compose on the target host and requires local persistent storage plus the external Traefik `proxy` local bridge network.
 
-### 5. [Paperless](paperless/README.md)
+### 4. [Paperless](paperless/README.md)
 - **Description**: Deploys Paperless-ngx with Redis, Gotenberg, and Tika for document management, OCR, and Office document conversion.
 - **Use Case**: Ideal for searchable archival and automated ingestion of scanned documents.
 - **Dependencies**: Runs with Docker Compose on the target host and requires local persistent storage plus the external Traefik `proxy` local bridge network.
 
-### 6. [NFS Backup](nfs-backup/README.md)
+### 5. [NFS Backup](nfs-backup/README.md)
 - **Description**: Runs encrypted Restic backups to S3 from short-lived containers scheduled by systemd; no backup container remains running between jobs.
 - **Schedule**: Daily backup at 00:00, weekly retention/prune, and weekly integrity checking.
 - **Retention**: Keeps the latest 24 hours plus 14 daily, 8 weekly, 12 monthly, and 3 yearly snapshots.
@@ -59,14 +54,14 @@ Single-host Compose deployments retain root-owned projects beneath `/opt/<servic
 - **Security**: All backups are strongly encrypted and services operate with least-privilege principles
 - **Dependencies**: Requires `/exports/docker` on the NFS server, Docker, systemd, and S3-compatible storage credentials
 
-### 7. [Omni Tools](omni/README.md)
+### 6. [Omni Tools](omni/README.md)
 - **Description**: Deploys Omni Tools, a self-hosted browser-based collection of everyday utility tools. It provides a lightweight, privacy-friendly alternative to scattered online services.
 - **Use Case**: Ideal for users who want a single, self-hosted destination for common utility tasks without relying on third-party websites.
 - **Dependencies**: Runs with Docker Compose on the target host and requires a local Traefik container on the external `proxy` bridge network.
 
-### 8. [Traefik](traefik/README.md)
+### 7. [Traefik](traefik/README.md)
 - **Description**: Acts as a reverse proxy for other services, enabling name resolution instead of relying on IP addresses and ports. It also integrates with DNS providers to issue valid HTTPS certificates.
-- **Use Case**: A critical component for managing traffic and securing connections in the cluster.
+- **Use Case**: Manages traffic and secures connections to the home lab applications.
 - **Dependencies**: None, but it is recommended to deploy Traefik first.
 
 ## Service Versions
@@ -99,7 +94,8 @@ Before deploying any services, ensure the following:
    - Deploy Traefik first to handle proxying and certificate management for other services.
 
 3. **Ansible Inventory**:
-   - Ensure [`inventory.yml`](../inventory.example.yml) defines all nodes in the cluster and groups them appropriately. Use [`inventory.example.yml`](../inventory.example.yml) at the repo root as a starting point.
+   - Application deployments can target a reachable hostname or IP address directly with `-e target=...` and `-u <ssh-user>`. Supply your own inventory with `-i inventory.yml` when using inventory aliases or host-specific settings.
+   - NFS Backup requires an inventory with one host in `nfs_servers`; see its [host and inventory instructions](nfs-backup/README.md#host-and-inventory).
 
 4. **DNS Configuration**:
    - Set up DNS records for the services you plan to deploy. Use Dynamic DNS if your public IP address changes frequently.
@@ -109,6 +105,6 @@ Before deploying any services, ensure the following:
 Run the service playbook from the repository root. For example, to deploy Omni Tools:
 
 ```bash
-ansible-playbook -i inventory.yml deployments/omni/deploy.yml \
-  -e target=odin --extra-vars @vault.yml --ask-vault-pass
+ansible-playbook deployments/omni/deploy.yml \
+  -e target=192.168.1.50 -u pi --extra-vars @vault.yml --ask-vault-pass
 ```

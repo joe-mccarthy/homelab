@@ -22,7 +22,7 @@ This repository contains the playbooks, roles, templates, and documentation I us
 - 💾 Provides shared persistent storage through [NFS](https://en.wikipedia.org/wiki/Network_File_System).
 - 🌐 Routes services through [Traefik](https://doc.traefik.io/traefik/) with domain-based access and HTTPS.
 - 🔐 Keeps sensitive values in [Ansible Vault](https://docs.ansible.com/ansible/latest/vault_guide/index.html).
-- 🧰 Includes ready-to-run deployments for self-hosted apps, observability, backups, automation, and cluster operations.
+- 🧰 Includes ready-to-run deployments for self-hosted apps, backups, automation, and cluster operations.
 
 ---
 
@@ -138,16 +138,12 @@ The full service catalog lives in [`deployments/README.md`](deployments/README.m
 | --- | --- |
 | [Traefik](deployments/traefik/README.md) | Reverse proxy, routing, and HTTPS certificate handling. |
 | [DDNS](deployments/ddns/README.md) | Dynamic DNS updates for home internet connections. |
-| [Portainer](deployments/portainer/README.md) | Web UI for Docker and Swarm visibility. |
-| [Dozzle](deployments/dozzle/README.md) | Browser-based real-time container logs. |
 | [Cioban](deployments/cioban/README.md) | Automated Docker service updates. |
-| [Gitea](deployments/gitea/README.md) | Self-hosted Git service and runners. |
 | [Home Assistant](deployments/home-assistant/README.md) | Smart home automation with Zigbee, MQTT, and Wi-Fi Matter support. |
 | [Immich](deployments/immich/README.md) | Self-hosted photo and video management. |
 | [Paperless](deployments/paperless/README.md) | Document management and OCR workflow. |
 | [Omni Tools](deployments/omni/README.md) | Self-hosted everyday browser utilities. |
 | [NFS Backup](deployments/nfs-backup/README.md) | Restic-based backups for shared NFS data. |
-| [Personal Blog](deployments/blog/README.md) | Example private-image blog deployment. |
 
 To deploy a single service:
 

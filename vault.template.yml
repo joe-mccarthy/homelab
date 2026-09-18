@@ -23,15 +23,8 @@ vault:
     nfs_restriction: ""
 
   services:
-    blog:
-      image: ""
-      port: ""
-
     ddns:
       dns_domains: ""
-
-    gitea:
-      runner_token: ""
 
     home_assistant:
       proxy: ""
@@ -54,9 +47,6 @@ vault:
     paperless:
       secret_key: ""
       database_password: ""
-
-    portainer:
-      admin_password: ""
 
     traefik:
       ports:

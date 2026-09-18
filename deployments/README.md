@@ -32,22 +32,12 @@ Single-host Compose deployments retain root-owned projects beneath `/opt/<servic
 - **Use Case**: Useful for home labs with dynamic IP addresses.
 - **Dependencies**: Runs with Docker Compose on the single `nfs_servers` host and requires a scoped Cloudflare API token. It does not use Traefik.
 
-### 4. [Dozzle](dozzle/README.md)
-- **Description**: Deploys Dozzle, a lightweight real-time web UI for viewing Docker container logs across the swarm.
-- **Use Case**: Ideal for quickly troubleshooting services and inspecting logs from a browser without SSHing into nodes.
-- **Dependencies**: Requires Traefik for proxying and certificate management, and Docker socket access on target nodes.
-
-### 5. [Gitea](gitea/README.md)
-- **Description**: Deploys a self-hosted Git service for managing repositories, similar to GitHub or GitLab.
-- **Use Case**: Ideal for developers who want to host their own version control system.
-- **Dependencies**: Requires Traefik for proxying and certificate management.
-
-### 6. [Home Assistant](home-assistant/README.md)
+### 4. [Home Assistant](home-assistant/README.md)
 - **Description**: Deploys Home Assistant, an open-source platform for home automation, with Zigbee2MQTT, Mosquitto, and Matter Server for Wi-Fi Matter devices.
 - **Use Case**: Perfect for managing and automating smart home devices.
 - **Dependencies**: Runs with Docker Compose on the single `nfs_servers` host and requires local Traefik proxying, LAN IPv6/mDNS, and a local or TCP-connected Zigbee coordinator.
 
-### 7. [Immich](immich/README.md)
+### 5. [Immich](immich/README.md)
 - **Description**: Immich is a high-performance self-hosted photo and video management solution that serves as a complete alternative to Google Photos. Features include:
   - Web interface and mobile apps for photo browsing and automatic backup
   - AI-powered features including face recognition and object detection
@@ -61,12 +51,12 @@ Single-host Compose deployments retain root-owned projects beneath `/opt/<servic
 - **Use Case**: Ideal for users looking to manage and organize their photo and video collections with advanced AI capabilities.
 - **Dependencies**: Runs with Docker Compose on the target host and requires local persistent storage plus the external Traefik `proxy` local bridge network.
 
-### 8. [Paperless](paperless/README.md)
+### 6. [Paperless](paperless/README.md)
 - **Description**: Deploys Paperless-ngx with Redis, Gotenberg, and Tika for document management, OCR, and Office document conversion.
 - **Use Case**: Ideal for searchable archival and automated ingestion of scanned documents.
 - **Dependencies**: Runs with Docker Compose on the target host and requires local persistent storage plus the external Traefik `proxy` local bridge network.
 
-### 9. [NFS Backup](nfs-backup/README.md)
+### 7. [NFS Backup](nfs-backup/README.md)
 - **Description**: Runs encrypted Restic backups to S3 from short-lived containers scheduled by systemd; no backup container remains running between jobs.
 - **Schedule**: Daily backup at 00:00, weekly retention/prune, and weekly integrity checking.
 - **Retention**: Keeps the latest 24 hours plus 14 daily, 8 weekly, 12 monthly, and 3 yearly snapshots.
@@ -74,22 +64,12 @@ Single-host Compose deployments retain root-owned projects beneath `/opt/<servic
 - **Security**: All backups are strongly encrypted and services operate with least-privilege principles
 - **Dependencies**: Requires `/exports/docker` on the NFS server, Docker, systemd, and S3-compatible storage credentials
 
-### 10. [Omni Tools](omni/README.md)
+### 8. [Omni Tools](omni/README.md)
 - **Description**: Deploys Omni Tools, a self-hosted browser-based collection of everyday utility tools. It provides a lightweight, privacy-friendly alternative to scattered online services.
 - **Use Case**: Ideal for users who want a single, self-hosted destination for common utility tasks without relying on third-party websites.
 - **Dependencies**: Runs with Docker Compose on the target host and requires a local Traefik container on the external `proxy` bridge network.
 
-### 11. [Personal Blog](blog/README.md)
-- **Description**: Deploys multiple instances of a private Docker image for a personal blog. This deployment demonstrates how to handle private registries and update services when new image versions become available.
-- **Use Case**: Ideal for hosting a personal website or blog with high availability.
-- **Dependencies**: Requires Traefik for proxying and certificate management.
-
-### 12. [Portainer](portainer/README.md)
-- **Description**: Provides a web-based interface for managing Docker and Docker Swarm. While deployments are managed by Ansible, Portainer offers a convenient UI for monitoring and manual management.
-- **Use Case**: Useful for visualizing and managing the cluster's status and activity.
-- **Dependencies**: Requires Traefik for proxying and certificate management.
-
-### 13. [Traefik](traefik/README.md)
+### 9. [Traefik](traefik/README.md)
 - **Description**: Acts as a reverse proxy for other services, enabling name resolution instead of relying on IP addresses and ports. It also integrates with DNS providers to issue valid HTTPS certificates.
 - **Use Case**: A critical component for managing traffic and securing connections in the cluster.
 - **Dependencies**: None, but it is recommended to deploy Traefik first.
@@ -100,9 +80,6 @@ Single-host Compose deployments retain root-owned projects beneath `/opt/<servic
 |---------|-----------|:-------:|
 | [Cioban](cioban/README.md) | cioban | `0.17.14` |
 | [DDNS](ddns/README.md) | cloudflare-ddns | `1.17.0` |
-| [Dozzle](dozzle/README.md) | dozzle | `latest` |
-| [Gitea](gitea/README.md) | server | `1.25.5` |
-| [Gitea](gitea/README.md) | act_runner | `0.2.12` |
 | [Home Assistant](home-assistant/README.md) | home-assistant | `2026.8.3` |
 | [Home Assistant](home-assistant/README.md) | matter-server | `1.4.0` |
 | [Home Assistant](home-assistant/README.md) | zigbee2mqtt | `2.13.0` |
@@ -114,8 +91,6 @@ Single-host Compose deployments retain root-owned projects beneath `/opt/<servic
 | [Paperless](paperless/README.md) | redis | `8.10.1` |
 | [Paperless](paperless/README.md) | gotenberg | `8.36.0` |
 | [Paperless](paperless/README.md) | tika | `3.3.1.0` |
-| [Portainer](portainer/README.md) | portainer-ce | `2.39.1` |
-| [Portainer](portainer/README.md) | portainer-agent | `2.39.1` |
 | [Omni Tools](omni/README.md) | omni-tools | `0.6.0` |
 | [Traefik](traefik/README.md) | traefik | `3.7.12` |
 
@@ -137,8 +112,9 @@ Before deploying any services, ensure the following:
 
 ## Usage
 
-To deploy a service, navigate to its directory and run the associated playbook. For example, to deploy the personal blog:
+Run the service playbook from the repository root. For example, to deploy Omni Tools:
 
 ```bash
-ansible-playbook blog/deploy.yml
+ansible-playbook -i inventory.yml deployments/omni/deploy.yml \
+  -e target=odin --extra-vars @vault.yml --ask-vault-pass
 ```

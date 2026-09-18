@@ -1,6 +1,0 @@
-blog:
-  image: "{{ vault.services.blog.image }}"  # Docker image for the blog service, sourced from Ansible Vault
-  port: "{{ (vault.services.blog.port | default('80')) }}"  # Internal port for the blog service, defaulting to 80 if not set in Vault
-
-# Optional explicit image pin for the blog service (override vault.services.blog.image if desired)
-# blog_image: "ghcr.io/<owner>/<repo>:<pinned-version>"

@@ -138,7 +138,6 @@ The full service catalog lives in [`deployments/README.md`](deployments/README.m
 | --- | --- |
 | [Traefik](deployments/traefik/README.md) | Reverse proxy, routing, and HTTPS certificate handling. |
 | [DDNS](deployments/ddns/README.md) | Dynamic DNS updates for home internet connections. |
-| [Cioban](deployments/cioban/README.md) | Automated Docker service updates. |
 | [Home Assistant](deployments/home-assistant/README.md) | Smart home automation with Zigbee, MQTT, and Wi-Fi Matter support. |
 | [Immich](deployments/immich/README.md) | Self-hosted photo and video management. |
 | [Paperless](deployments/paperless/README.md) | Document management and OCR workflow. |

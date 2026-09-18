@@ -1,6 +1,0 @@
----
-# Version pinning for Cioban deployment
-cioban_version: "0.17.14"
-
-# Root's Docker login stores private-registry credentials here by default.
-cioban_docker_config_path: "/root/.docker/config.json"

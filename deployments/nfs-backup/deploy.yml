@@ -157,7 +157,7 @@
           ansible.builtin.command:
             argv:
               - kill
-              - -0
+              - "-0"
               - "{{ deploy_backup_maintenance_lock.stdout | trim }}"
           register: deploy_backup_maintenance_lock_process
           changed_when: false

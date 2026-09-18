@@ -1,5 +1,0 @@
----
-- name: Delete compose directory
-  ansible.builtin.file:
-    path: /home/docker-compose
-    state: absent

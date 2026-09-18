@@ -22,14 +22,6 @@
 # - It updates DNS records dynamically to reflect the public IP address of the internet gateway.
 # - This playbook assumes the use of the Cloudflare API for DNS updates.
 
-# Import the Cioban deployment playbook
-- name: Import Cioban deployment playbook
-  import_playbook: ../cioban/deploy.yml
-  # Cioban is responsible for automatically updating Docker services.
-  # - It monitors services for new Docker image versions.
-  # - When a new image is detected, it updates the service according to its deployment policies.
-  # - This ensures that services remain up-to-date with minimal manual intervention.
-
 # Import the NFS Backup deployment playbook
 - name: Import NFS Backup deployment playbook
   import_playbook: ../nfs-backup/deploy.yml

@@ -1,0 +1,58 @@
+---
+- name: Validate home server update target
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: Require a target host or address
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target | default('') | string | trim | length > 0
+        fail_msg: >-
+          Pass an inventory hostname, DNS name, or IP address with
+          -e target=<host-or-address>.
+
+    - name: Add target to the temporary update group
+      ansible.builtin.add_host:
+        name: "{{ target | string | trim }}"
+        groups: home_server_update
+
+- name: Update home server packages
+  hosts: home_server_update
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+
+  vars:
+    home_server_update_cache_valid_time: 3600
+
+  pre_tasks:
+    - name: Require a supported operating system
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.os_family == 'Debian'
+          - ansible_facts.distribution in ['Debian', 'Ubuntu']
+        fail_msg: This playbook supports Debian and Ubuntu hosts only.
+
+  tasks:
+    - name: Refresh package metadata and upgrade installed packages
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: "{{ home_server_update_cache_valid_time }}"
+        upgrade: dist
+        lock_timeout: 120
+      register: home_server_package_update
+
+    - name: Inspect the operating system reboot flag
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: home_server_reboot_flag
+
+    - name: Report update result
+      ansible.builtin.debug:
+        msg:
+          host: "{{ inventory_hostname }}"
+          packages_changed: "{{ home_server_package_update.changed }}"
+          reboot_required: "{{ home_server_reboot_flag.stat.exists }}"
+          check_mode: "{{ ansible_check_mode }}"

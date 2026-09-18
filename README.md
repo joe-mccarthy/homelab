@@ -30,7 +30,7 @@ This repository contains the playbooks, roles, templates, and documentation I us
 
 | Path | Purpose |
 | --- | --- |
-| [`home_server/`](home_server/README.md) | Bootstrap standalone Docker hosts, local storage roots, and the proxy bridge network. |
+| [`home_server/`](home_server/README.md) | Bootstrap Docker hosts, update packages, report status, reboot, and mount application storage. |
 | [`deployments/`](deployments/README.md) | Service deployments, Docker Compose templates, roles, and per-service docs. |
 | [`vault.template.yml`](vault.template.yml) | Complete reference for expected secret values. |
 | [`requirements.yml`](requirements.yml) | Required Ansible collections. |
@@ -87,6 +87,8 @@ ansible-playbook home_server/setup.yml \
 ```
 
 This installs Docker Engine and the Compose plugin, configures the Docker daemon, creates local storage roots and the `proxy` bridge, and logs in to configured registries. See the [home-server bootstrap guide](home_server/README.md) for details.
+
+For a separate NVMe/SSD data filesystem, configure the [application storage mount](home_server/README.md#mount-application-storage-optional) before deploying services.
 
 ### 4. Deploy Routing and DNS
 

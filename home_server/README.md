@@ -8,16 +8,14 @@ It installs Docker Engine and the Compose plugin from Docker's official APT
 repository, enables bounded container logs, adds the Ansible connection user to
 the `docker` group, creates `/exports/docker` and `/opt`, creates the local
 `proxy` network, logs in to every Docker registry configured in the vault, and
-verifies the Docker installation. An existing attachable Swarm overlay is
-preserved so Compose and legacy Swarm services can share it. The playbook stops
-with migration guidance rather than replacing a non-attachable overlay.
+verifies the Docker installation. The `proxy` network is created as a local
+bridge when absent; an existing network is validated as a local bridge before
+deployment continues.
 
 ## Prerequisites
 
 - The target account must have sudo access.
 - The target must run Debian or Ubuntu.
-- A Swarm-active target must be a manager so the migration can remove legacy
-  services and retain Traefik discovery for services not yet migrated.
 - Install the repository collections with
   `ansible-galaxy collection install -r requirements.yml`.
 - Create and encrypt `vault.yml` with a `vault.docker_registries` list based on

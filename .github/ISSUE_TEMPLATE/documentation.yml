@@ -16,7 +16,7 @@ body:
     id: page
     attributes:
       label: "Page or path"
-      placeholder: "docker-swarm/README.md"
+      placeholder: "home_server/README.md"
 
   - type: textarea
     id: audience

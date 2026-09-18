@@ -62,7 +62,6 @@
         name: "{{ item }}"
         state: present
       loop:
-        - python3-jsondiff  # Diff helper used by community.docker.docker_stack.
         - python3-docker    # Docker SDK for Python used by Docker-focused automation.
         - python3-requests  # HTTP client library for API-driven scripts and modules.
         - python3-yaml      # YAML parser/emitter for config processing in Python utilities.

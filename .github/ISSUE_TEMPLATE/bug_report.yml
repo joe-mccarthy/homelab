@@ -26,7 +26,7 @@ body:
       label: "Area"
       description: "Which part of the homelab is affected?"
       options:
-        - "Docker Swarm"
+        - "Home server setup"
         - "Deployment"
         - "Maintenance"
         - "Inventory or vault"

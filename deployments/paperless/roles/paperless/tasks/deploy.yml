@@ -1,14 +1,4 @@
 ---
-- name: Remove legacy Paperless Swarm services before deployment
-  ansible.builtin.include_role:
-    name: remove_legacy_swarm_services
-  vars:
-    remove_legacy_swarm_services_list:
-      - paperless_paperless
-      - paperless_paperless-broker
-      - paperless_paperless-tika
-      - paperless_paperless-gotenberg
-
 - name: Remove existing Paperless containers before deployment
   community.docker.docker_container:
     name: "{{ item }}"

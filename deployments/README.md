@@ -59,12 +59,12 @@ Single-host Compose deployments retain root-owned projects beneath `/opt/<servic
   - **immich-redis**: Cache and session storage for performance
   - **immich-machine-learning**: AI processing for smart features
 - **Use Case**: Ideal for users looking to manage and organize their photo and video collections with advanced AI capabilities.
-- **Dependencies**: Runs with Docker Compose on the single `nfs_servers` host and requires local persistent storage plus the external Traefik `proxy` network (a local bridge or an attachable Swarm overlay).
+- **Dependencies**: Runs with Docker Compose on the target host and requires local persistent storage plus the external Traefik `proxy` local bridge network.
 
 ### 8. [Paperless](paperless/README.md)
 - **Description**: Deploys Paperless-ngx with Redis, Gotenberg, and Tika for document management, OCR, and Office document conversion.
 - **Use Case**: Ideal for searchable archival and automated ingestion of scanned documents.
-- **Dependencies**: Runs with Docker Compose on the single `nfs_servers` host and requires local persistent storage plus the external Traefik `proxy` network (a local bridge or an attachable Swarm overlay).
+- **Dependencies**: Runs with Docker Compose on the target host and requires local persistent storage plus the external Traefik `proxy` local bridge network.
 
 ### 9. [NFS Backup](nfs-backup/README.md)
 - **Description**: Runs encrypted Restic backups to S3 from short-lived containers scheduled by systemd; no backup container remains running between jobs.

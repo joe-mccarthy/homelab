@@ -85,6 +85,8 @@ ansible-playbook -i inventory.yml deployments/immich/deploy.yml \
 ```
 
 The Paperless and Immich commands above intentionally initialize empty data
-directories. For migrations, restore the existing data first and omit the
-corresponding `allow_fresh_install` variable; both deployments protect existing
-data by default.
+directories. For a Paperless SQLite migration, follow its export/import runbook
+and add `-e paperless_sqlite_migration=true` to the first PostgreSQL deployment.
+Other migrations should restore existing data and omit the corresponding
+`allow_fresh_install` variable; both deployments protect existing data by
+default.

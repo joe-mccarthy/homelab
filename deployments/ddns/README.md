@@ -51,11 +51,12 @@ ansible-playbook \
   --ask-vault-pass
 ```
 
-The role verifies that the Cloudflare token is active, validates and pulls the Compose project, removes the known legacy `ddns_cloudflare-ddns` Swarm service when present, starts the container, and confirms it remains running. It does not prune unrelated Swarm resources.
+The role validates the Compose project, pulls the image, starts the container,
+and verifies that the DDNS service is running.
 
 Immediately before startup, the role stops and removes any existing `cloudflare-ddns` container, including one from an earlier run of this Compose project. Compose then runs with `recreate: always`, so every successful playbook run creates a fresh container. The removal retains volumes and does not perform broad container pruning.
 
-DDNS does not use the shared `proxy` network, so it can be migrated independently of Traefik and the web applications.
+DDNS can be deployed independently of Traefik and the web applications.
 
 | Stage | Task file | Responsibility |
 | --- | --- | --- |
@@ -74,6 +75,6 @@ sudo docker compose --project-directory /opt/ddns restart cloudflare-ddns
 sudo docker compose --project-directory /opt/ddns config --quiet
 ```
 
-After deployment, confirm the logs show successful public IPv4 detection and Cloudflare record reconciliation. Also verify that exactly one DDNS updater is running during and after migration.
+After deployment, confirm the logs show successful public IPv4 detection and Cloudflare record reconciliation. Also verify that exactly one DDNS updater is running.
 
 Redeploy after changing variables or templates by rerunning Ansible. Do not edit `/opt/ddns/compose.yaml` directly because Ansible replaces it.

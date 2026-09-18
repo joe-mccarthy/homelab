@@ -49,6 +49,14 @@
         label: "{{ item.path }}"
       register: deploy_backup_original_files
 
+    - name: Record whether this is a fresh backup scheduler installation
+      ansible.builtin.set_fact:
+        deploy_backup_fresh_install: >-
+          {{
+            deploy_backup_original_files.results |
+            selectattr('stat.exists') | list | length == 0
+          }}
+
     - name: Record backup timer enablement before deployment
       ansible.builtin.command:
         argv:
@@ -178,7 +186,7 @@
             path: /run/nfs-backup-maintenance
             state: absent
 
-        - name: Release backup host lock after cutover
+        - name: Release backup host lock after deployment
           ansible.builtin.command:
             argv:
               - kill
@@ -245,6 +253,11 @@
           when:
             - not item.stat.exists
             - not (deploy_backup_scheduler_activated | default(false) | bool)
+            - >-
+              not (
+                deploy_backup_preserve_initialization_artifacts |
+                default(false) | bool
+              )
 
         - name: Reload restored systemd units
           ansible.builtin.systemd:
@@ -287,7 +300,14 @@
               Backup deployment failed. {{
                 (deploy_backup_scheduler_activated | default(false) | bool) |
                 ternary(
-                  'The validated replacement scheduler remains active; retry legacy Swarm cleanup.',
-                  'Managed files and the previous timer enablement state were restored.'
+                  'The validated backup scheduler remains active; retry deployment cleanup.',
+                  (
+                    deploy_backup_preserve_initialization_artifacts |
+                    default(false) | bool
+                  ) |
+                  ternary(
+                    'The repository needs initialization. Installed artifacts were retained with timers disabled.',
+                    'Managed files and the previous timer enablement state were restored.'
+                  )
                 )
               }}

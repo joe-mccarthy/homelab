@@ -1,15 +1,4 @@
 ---
-- name: Remove legacy Home Assistant Swarm services before deployment
-  ansible.builtin.include_role:
-    name: remove_legacy_swarm_services
-  vars:
-    remove_legacy_swarm_services_list:
-      - home_assistant_homeassistant
-      - home_assistant_zigbee2mqtt
-      - home_assistant_matter-server
-      - home_assistant_matter-server-proxy
-      - home_assistant_mqtt
-
 - name: Remove existing Home Assistant containers before deployment
   community.docker.docker_container:
     name: "{{ item }}"
@@ -21,7 +10,6 @@
     - zigbee2mqtt
     - matter-server
     - mqtt
-    - matter-server-proxy
   loop_control:
     label: "{{ item }}"
 

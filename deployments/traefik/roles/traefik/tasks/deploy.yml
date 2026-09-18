@@ -1,11 +1,4 @@
 ---
-- name: Remove legacy Traefik Swarm service before deployment
-  ansible.builtin.include_role:
-    name: remove_legacy_swarm_services
-  vars:
-    remove_legacy_swarm_services_list:
-      - traefik_traefik
-
 - name: Remove existing Traefik container before deployment
   community.docker.docker_container:
     name: traefik

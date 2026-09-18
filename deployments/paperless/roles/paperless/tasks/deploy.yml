@@ -1,15 +1,4 @@
 ---
-- name: Quiesce legacy Paperless Swarm services before deployment
-  ansible.builtin.include_role:
-    name: remove_legacy_swarm_services
-  vars:
-    remove_legacy_swarm_services_action: quiesce
-    remove_legacy_swarm_services_list:
-      - paperless_paperless
-      - paperless_paperless-broker
-      - paperless_paperless-tika
-      - paperless_paperless-gotenberg
-
 - name: Remove existing Paperless containers before deployment
   community.docker.docker_container:
     name: "{{ item }}"
@@ -24,10 +13,6 @@
     - paperless-postgres
   loop_control:
     label: "{{ item }}"
-
-- name: Record Paperless Compose cutover attempt
-  ansible.builtin.set_fact:
-    paperless_compose_cutover_attempted: true
 
 - name: Create and start Paperless containers
   community.docker.docker_compose_v2:
@@ -89,18 +74,3 @@
   delay: 2
   until: (paperless_conversion_services.rc | default(1)) == 0
   when: not ansible_check_mode
-
-- name: Record verified Paperless Compose cutover
-  ansible.builtin.set_fact:
-    paperless_compose_cutover_committed: true
-
-- name: Retire legacy Paperless Swarm services
-  ansible.builtin.include_role:
-    name: remove_legacy_swarm_services
-  vars:
-    remove_legacy_swarm_services_action: remove
-    remove_legacy_swarm_services_list:
-      - paperless_paperless
-      - paperless_paperless-broker
-      - paperless_paperless-tika
-      - paperless_paperless-gotenberg

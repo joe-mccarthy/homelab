@@ -136,9 +136,9 @@ Repeat for prune and check if required.
 
 If Ansible deployment failed, inspect its recovery output. Before scheduler
 activation, the playbook restores the managed files and prior timer enablement
-state. If legacy Swarm cleanup fails after activation, it keeps the validated
-replacement timers active to avoid losing backup coverage. Fix the original
-error and rerun the playbook to finish legacy cleanup.
+state. If deployment cleanup fails after activation, it keeps the validated
+timers active to preserve backup coverage. Fix the original error and rerun the
+playbook to finish deployment cleanup.
 
 ## Timer Has No Next Run
 

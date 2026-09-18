@@ -20,7 +20,7 @@ Docker Compose runs the project as `home_assistant` and assigns stable container
 
 ## Runtime Model
 
-All four containers run on the host passed through `-e target=...`. The deployment uses ordinary Docker Compose without node labels or placement constraints. Its private project network is local; the external proxy network can be a bridge on a Compose-only host or an attachable overlay on a Swarm host.
+All four containers run on the host passed through `-e target=...`. The deployment uses Docker Compose with a private project network and an external local bridge network for proxy traffic.
 
 Home Assistant, Zigbee2MQTT, and Mosquitto share the Compose project network. Home Assistant and Zigbee2MQTT also join the external `proxy` network so the local Traefik container can route HTTPS traffic to them.
 
@@ -54,7 +54,7 @@ The rendered Compose project remains at `/opt/home-assistant/compose.yaml` so no
 - Working IPv6 and mDNS/multicast between this host and Matter devices.
 - Vault values defined from [`../../vault.template.yml`](../../vault.template.yml).
 
-The machine bootstrap creates the external `proxy` bridge on a Compose-only host or an attachable overlay on a Swarm host; this deployment does not manage it.
+The machine bootstrap creates the external `proxy` bridge on a standalone Docker host; this deployment requires it to exist before deployment.
 
 ## Deploy
 
@@ -90,11 +90,6 @@ The deployment:
 7. Reapplies Matter Server data ownership after its container has stopped.
 8. Runs `docker compose up` with forced recreation and waits for all four containers without another registry request.
 9. Fails unless every expected service is running.
-
-Known Home Assistant Swarm services are first scaled to zero and retained during
-replacement startup. They are retired only after every Compose service is
-running; a failed stateful cutover leaves those definitions quiesced for an
-operator-controlled rollback. The role does not prune unrelated resources.
 
 ## Configuration
 
@@ -188,7 +183,7 @@ This setup supports Wi-Fi Matter devices. Thread devices additionally require a 
 
 | Symptom | Check |
 | --- | --- |
-| Only Matter Server starts | Inspect `proxy` with `docker network inspect proxy`; it must be a bridge on a Compose-only host or an attachable overlay on a Swarm host. |
+| Only Matter Server starts | Inspect `proxy` with `docker network inspect proxy`; it must be a local bridge network. |
 | Deployment reports a missing service | Run `sudo docker compose --project-directory /opt/home-assistant ps --all` and inspect the failed service's logs. |
 | Home Assistant proxy errors | Update `vault.services.home_assistant.proxy` for the local proxy bridge CIDR. |
 | Zigbee2MQTT cannot open the coordinator | For local hardware, verify the device path and ownership. For TCP hardware, verify the host and port are reachable. |

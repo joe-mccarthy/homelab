@@ -1,5 +1,5 @@
 ---
-- name: Pull Home Assistant project images before cutover
+- name: Pull Home Assistant project images before deployment
   community.docker.docker_compose_v2_pull:
     project_src: "{{ home_assistant.compose_dir }}"
     project_name: home_assistant

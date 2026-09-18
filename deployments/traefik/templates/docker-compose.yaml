@@ -32,12 +32,6 @@ services:
       - --providers.docker.endpoint=unix:///var/run/docker.sock
       - --providers.docker.exposedbydefault=false
       - "--providers.docker.network={{ traefik.proxy_network }}"
-{% if (traefik_docker_info.stdout | from_json).Swarm.ControlAvailable %}
-      - --providers.swarm=true
-      - --providers.swarm.endpoint=unix:///var/run/docker.sock
-      - --providers.swarm.exposedbydefault=false
-      - "--providers.swarm.network={{ traefik.proxy_network }}"
-{% endif %}
 
       - --certificatesresolvers.letsencrypt.acme.dnschallenge=true
       - --certificatesresolvers.letsencrypt.acme.dnschallenge.provider=cloudflare

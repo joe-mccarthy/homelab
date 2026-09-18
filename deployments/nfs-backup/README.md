@@ -474,7 +474,7 @@ The deployment performs these steps in order:
 1. Confirm exactly one NFS host is configured.
 2. Ensure Docker and `flock` are available.
 3. If this scheduler is already installed, stop and disable its timers.
-4. Acquire the runner lock continuously across installation and cutover.
+4. Acquire the runner lock continuously across installation and timer activation.
 5. Validate non-empty, safe configuration values.
 6. Verify `/exports/docker` exists and is a directory.
 7. Create protected configuration, cache, and restore directories.
@@ -484,12 +484,11 @@ The deployment performs these steps in order:
 11. Require an existing snapshot for host `nfs-backup`, path `/exports/docker`,
    and tag `nfs-backup`.
 12. Refuse activation if any repository lock exists.
-13. Remove the legacy Swarm backup schedules.
-14. Recheck repository locks after legacy cleanup.
-15. Enable and start the three systemd timers.
+13. Recheck repository locks immediately before timer activation.
+14. Enable and start the three systemd timers.
 
-No replacement timer is enabled until validation and legacy cleanup succeed. On
-a failed redeployment, managed files and prior timer states are restored. Fix
+Timers are enabled after validation succeeds. If deployment fails before
+scheduler activation, managed files and prior timer states are restored. Fix
 the reported problem and rerun the playbook rather than manually enabling
 partially updated timers.
 

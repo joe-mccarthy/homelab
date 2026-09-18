@@ -15,9 +15,8 @@ An Ansible-managed, single-host Docker Compose deployment of Paperless-ngx with 
 | `paperless-tika` | `3.3.1.0` | Office document and metadata parsing. |
 
 All five containers run on the host passed through `-e target=...`. Paperless
-joins the external `proxy` network for Traefik; this is a local bridge on a
-Compose-only host or an attachable overlay on a Swarm manager. Backend traffic
-uses an internal Compose network.
+joins the external local `proxy` bridge network for Traefik. Backend traffic uses
+an internal Compose network.
 
 ## Paths
 
@@ -42,7 +41,7 @@ The legacy floating `redis:8` image can write RDB format 14. Redis versions befo
 - The `community.docker` collection from [`requirements.yml`](../../requirements.yml).
 - `/exports/docker` on local storage, or `paperless.data_dir` changed to another local path.
 - The machine bootstrap's external `proxy` network.
-- A local Traefik container attached to that bridge or attachable overlay.
+- A local Traefik container attached to that bridge.
 - DNS for `paperless.<domain>` directed to Traefik.
 - Vault values defined from [`vault.template.yml`](../../vault.template.yml).
 
@@ -50,7 +49,7 @@ The legacy floating `redis:8` image can write RDB format 14. Redis versions befo
 
 The play requires an initialized PostgreSQL 18 cluster under `/exports/docker/paperless/database` and the existing `data` and `media` directories. It verifies the cluster's `PG_VERSION` marker before replacing containers, preventing an incorrect path from silently creating an empty database.
 
-The legacy Swarm deployment used SQLite at
+Older Paperless installations used SQLite at
 `/exports/docker/paperless/data/db.sqlite3`. Do not use
 `paperless_allow_fresh_install=true` while that database is still present. The
 role refuses the cutover until the following migration is complete:
@@ -74,11 +73,6 @@ the SQLite export. Retain the export as a backup, but omit both flags on later
 deployments; an initialized PostgreSQL cluster takes precedence over it.
 
 The Compose settings retain automatic OCR, archive generation, and duplicate rejection. Tika remains on the latest release pinned by Paperless upstream because Tika 4 is not yet the supported conversion image.
-
-During migration, the four known legacy `paperless_*` Swarm services are scaled
-to zero and retained until the Compose replacement and conversion services are
-verified. A failed stateful cutover leaves those definitions quiesced for
-operator-controlled recovery. Unrelated Swarm resources are not pruned.
 
 ## Configuration
 

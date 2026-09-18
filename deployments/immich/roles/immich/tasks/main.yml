@@ -12,28 +12,4 @@
   ansible.builtin.import_tasks: pull.yml
 
 - name: Run Immich deployment stage
-  block:
-    - name: Deploy Immich replacement
-      ansible.builtin.import_tasks: deploy.yml
-  rescue:
-    - name: Stop an unverified Immich replacement
-      community.docker.docker_compose_v2:
-        project_src: "{{ immich.compose_dir }}"
-        project_name: immich
-        state: absent
-        remove_orphans: true
-      failed_when: false
-      when:
-        - immich_compose_cutover_attempted | default(false) | bool
-        - not (immich_compose_cutover_committed | default(false) | bool)
-
-    - name: Report preserved Immich rollback point
-      ansible.builtin.fail:
-        msg: >-
-          Immich cutover failed. {{
-            (immich_compose_cutover_committed | default(false) | bool) |
-            ternary(
-              'The verified Compose replacement remains active; legacy retirement must be retried.',
-              'Any unverified Compose replacement was stopped; legacy definitions remain available for recovery.'
-            )
-          }}
+  ansible.builtin.import_tasks: deploy.yml

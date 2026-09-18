@@ -13,9 +13,9 @@ An Ansible-managed, single-host Docker Compose deployment of Immich, PostgreSQL,
 | `immich-redis` | `valkey/valkey:9` pinned by digest | Cache and job coordination. |
 | `immich-database` | Immich PostgreSQL 14 image pinned by digest | Metadata and vector search database. |
 
-All containers run on the host passed through `-e target=...`. Docker Swarm
-placement is not used. The private project network is local, while the external
-proxy network can be an attachable overlay on a Swarm manager.
+All containers run on the host passed through `-e target=...` using Docker
+Compose. The private project network and external proxy bridge are local to
+that host.
 
 The server joins the external `proxy` network for Traefik. Database, Valkey, and
 machine learning traffic remains on the private Compose project network.
@@ -40,7 +40,7 @@ machine learning traffic remains on the private Compose project network.
 - The `community.docker` collection from [`requirements.yml`](../../requirements.yml).
 - `/exports/docker` on local storage, or `immich.data_dir` changed to another local path.
 - The machine bootstrap's external `proxy` network.
-- A local Traefik container attached to that bridge or attachable overlay.
+- A local Traefik container attached to that bridge.
 - DNS for `immich.<domain>` directed to Traefik.
 - At least 6 GB RAM; 8 GB and four CPU cores are recommended.
 - An x86-64-v2 or newer CPU when using x86 machine-learning images.
@@ -61,11 +61,6 @@ Before the first Compose start:
 4. Create and test a native PostgreSQL backup.
 
 The play requires the existing PostgreSQL `PG_VERSION` file and all six Immich `.immich` media markers before deployment. These checks prevent a wrong path from becoming a fresh, empty installation.
-
-During migration, the four known legacy `immich_*` Swarm services are scaled to
-zero and retained until the Compose replacement is verified. A failed stateful
-cutover leaves those definitions quiesced for operator-controlled recovery.
-Unrelated services, stacks, and overlay networks are not pruned.
 
 ## Configuration
 

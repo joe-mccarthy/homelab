@@ -186,7 +186,7 @@
             path: /run/nfs-backup-maintenance
             state: absent
 
-        - name: Release backup host lock after cutover
+        - name: Release backup host lock after deployment
           ansible.builtin.command:
             argv:
               - kill
@@ -212,19 +212,6 @@
           changed_when: true
           failed_when: false
           when: deploy_backup_maintenance_lock is defined
-
-        - name: Restore quiesced legacy backup schedules
-          ansible.builtin.include_role:
-            name: remove_legacy_swarm_services
-          vars:
-            remove_legacy_swarm_services_action: restore
-            remove_legacy_swarm_services_list:
-              - nfs_backup_restic_backup
-              - nfs_backup_restic_prune
-              - nfs_backup_restic_check
-          when:
-            - deploy_backup_legacy_scheduler_quiesced | default(false) | bool
-            - not (deploy_backup_scheduler_activated | default(false) | bool)
 
         - name: Stop replacement backup timers
           ansible.builtin.systemd:
@@ -313,7 +300,7 @@
               Backup deployment failed. {{
                 (deploy_backup_scheduler_activated | default(false) | bool) |
                 ternary(
-                  'The validated replacement scheduler remains active; retry legacy Swarm cleanup.',
+                  'The validated backup scheduler remains active; retry deployment cleanup.',
                   (
                     deploy_backup_preserve_initialization_artifacts |
                     default(false) | bool

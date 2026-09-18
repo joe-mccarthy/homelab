@@ -2,13 +2,13 @@
 
 [![Ansible](https://img.shields.io/badge/Ansible-Automation-EE0000?logo=ansible&logoColor=white&style=flat-square)](https://docs.ansible.com/) [![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white&style=flat-square)](https://docs.docker.com/compose/) [![Let's Encrypt](https://img.shields.io/badge/Let's%20Encrypt-TLS-003A70?logo=letsencrypt&logoColor=white&style=flat-square)](https://letsencrypt.org/docs/) [![Cloudflare](https://img.shields.io/badge/Cloudflare-DNS%20Challenge-F38020?logo=cloudflare&logoColor=white&style=flat-square)](https://developers.cloudflare.com/dns/) ![Traefik](https://img.shields.io/badge/Traefik-v3.7.12-5C5C5C?style=flat-square)
 
-An Ansible-managed, single-host Docker Compose deployment of Traefik. It discovers local containers through the Docker provider and legacy Swarm services through the Swarm provider, routes HTTP, HTTPS, and SSH traffic, and obtains wildcard certificates with a Cloudflare DNS-01 challenge.
+An Ansible-managed, single-host Docker Compose deployment of Traefik. It discovers local containers through the Docker provider, routes HTTP, HTTPS, and SSH traffic, and obtains wildcard certificates with a Cloudflare DNS-01 challenge.
 
 ## Runtime Model
 
-Traefik runs on the host passed through `-e target=...` using ordinary Docker Compose, Docker and Swarm providers, a shared external network, and file-backed Compose secrets.
+Traefik runs on the host passed through `-e target=...` using Docker Compose, the Docker provider, a shared external bridge network, and file-backed Compose secrets.
 
-The container joins the external `proxy` network. On a Swarm manager this can be the existing attachable overlay, allowing Traefik to reach both Compose containers and legacy Swarm services. Other Compose services must join the same network and place their Traefik labels directly under the service-level `labels` key.
+The container joins the external local `proxy` bridge network. Other Compose services must join the same network and place their Traefik labels directly under the service-level `labels` key.
 
 The rendered project remains at `/opt/traefik` so normal `docker compose` commands can manage it after deployment. Persistent certificates and logs live under `/exports/docker/traefik` by default.
 
@@ -23,7 +23,7 @@ The rendered project remains at `/opt/traefik` so normal `docker compose` comman
 
 The Cloudflare token should be limited to DNS zone read and edit permissions for the required zone.
 
-The external `proxy` network must already exist; this deployment does not manage it. [`home_server/setup.yml`](../../home_server/setup.yml) creates it when absent and safely rejects an existing non-attachable Swarm overlay. New Swarm setups create the overlay as attachable. Existing clusters must recreate a non-attachable overlay during a maintenance window before Compose containers can join it.
+The external `proxy` network must already exist as a local bridge. [`home_server/setup.yml`](../../home_server/setup.yml) creates it when absent on a standalone Docker host.
 
 ## Deploy
 
@@ -44,15 +44,9 @@ The deployment uses one Traefik role with five ordered task files:
 | Filesystem | [`filesystem.yml`](roles/traefik/tasks/filesystem.yml) | Creates parent directories, persistent data, logs, ACME storage, Compose, and secret paths with their required ownership and modes. |
 | Prepare | [`prepare.yml`](roles/traefik/tasks/prepare.yml) | Ensures Docker is running, writes secrets, and renders and validates the Compose project. |
 | Pull | [`pull.yml`](roles/traefik/tasks/pull.yml) | Pulls the pinned Traefik image before the existing proxy is interrupted. |
-| Deploy | [`deploy.yml`](roles/traefik/tasks/deploy.yml) | Quiesces the legacy Swarm service, starts and verifies Compose, then retires the legacy definition. |
+| Deploy | [`deploy.yml`](roles/traefik/tasks/deploy.yml) | Replaces the existing container, starts Compose, and verifies Traefik is running. |
 
 [`roles/traefik/tasks/main.yml`](roles/traefik/tasks/main.yml) imports these files in deployment order. The top-level playbook includes only the `traefik` role.
-
-The role retains the legacy `traefik_traefik` definition at zero replicas during
-cutover and temporarily releases its published ports. It retires that definition
-only after verification; a failed replacement is stopped and the legacy service
-and ports are restored. Unrelated resources and the external `proxy` network
-remain intact.
 
 ## Configuration
 

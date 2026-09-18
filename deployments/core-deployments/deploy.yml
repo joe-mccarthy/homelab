@@ -6,6 +6,8 @@
 # Import the Traefik deployment playbook
 - name: Import Traefik deployment playbook
   import_playbook: ../traefik/deploy.yml
+  vars:
+    target: "{{ groups['nfs_servers'] | first }}"
 # Traefik is a reverse proxy that handles:
 # - Routing traffic to services based on domain names.
 # - Issuing and managing HTTPS certificates via DNS challenges.
@@ -14,6 +16,8 @@
 # Import the Dynamic DNS deployment playbook
 - name: Import Dynamic DNS deployment playbook
   import_playbook: ../ddns/deploy.yml
+  vars:
+    target: "{{ groups['nfs_servers'] | first }}"
 # Dynamic DNS ensures that the cluster's services are accessible via domain names.
 # - It updates DNS records dynamically to reflect the public IP address of the internet gateway.
 # - This playbook assumes the use of the Cloudflare API for DNS updates.

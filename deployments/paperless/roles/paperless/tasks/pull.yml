@@ -1,0 +1,18 @@
+---
+- name: Pull Paperless project image
+  community.docker.docker_compose_v2_pull:
+    project_src: "{{ paperless.compose_dir }}"
+    project_name: paperless
+    services:
+      - "{{ item }}"
+    policy: missing
+  loop:
+    - paperless-broker
+    - paperless-database
+    - paperless-gotenberg
+    - paperless-tika
+    - paperless
+  loop_control:
+    label: "{{ item }}"
+  async: 3600
+  poll: 10

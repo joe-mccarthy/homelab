@@ -1,32 +1,30 @@
 ---
-# This playbook is responsible for deploying the Home Assistant stack to the Docker Swarm cluster.
-# It performs the following tasks:
-# 1. Ensures that the required NFS directory for Home Assistant exists and is properly configured.
-# 2. Deploys the Home Assistant stack using Docker Swarm by leveraging the `deploy_home_assistant` role.
+- name: Validate Home Assistant target
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: Require a Home Assistant target
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target | default('') | string | trim | length > 0
+        fail_msg: >-
+          Pass an inventory hostname, DNS name, or IP address with
+          -e target=<host-or-address>.
+
+    - name: Add Home Assistant target to the temporary deployment group
+      ansible.builtin.add_host:
+        name: "{{ target | string | trim }}"
+        groups: deployment_target
 
 - name: Deploy Home Assistant
-  hosts: manager  # Target the manager group instead of hard-coding a specific index.
-  order: shuffle  # Select a manager without always preferring the first inventory host.
-  become: true  # Execute tasks with elevated privileges (sudo) to ensure proper permissions.
-  vars:
-    home_assistant_deploy_host: "{{ ansible_play_hosts_all | first }}"
+  hosts: deployment_target
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+
   tasks:
-    - name: Ensure Home Assistant NFS paths exist
+    - name: Run staged Home Assistant deployment
       ansible.builtin.include_role:
-        name: check_nfs
-      when: inventory_hostname == home_assistant_deploy_host
-
-    - name: Deploy Home Assistant stack
-      ansible.builtin.include_role:
-        name: deploy_home_assistant
-      when: inventory_hostname == home_assistant_deploy_host
-
-# Notes:
-# - Ensure that the `manager` group is properly defined in the Ansible inventory file, with at least one manager node.
-# - The `check_nfs` role should verify and create the necessary NFS directory for Home Assistant.
-# - The `deploy_home_assistant` role should include all tasks required to prepare the environment, deploy the stack, and clean up temporary files.
-# - This playbook assumes that the Docker Swarm cluster is already initialized and functional.
-# - Always test the deployment in a staging environment before applying it to production.
-# - Use `become: true` cautiously and ensure that the user running the playbook has the necessary sudo privileges.
-# - Modular roles like `check_nfs` and `deploy_home_assistant` improve reusability and maintainability across similar deployments.
-# - Tasks run only on the first host selected for the play, ensuring a single-manager deployment.
+        name: home_assistant

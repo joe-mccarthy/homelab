@@ -1,0 +1,69 @@
+---
+- name: Require the local application data root
+  ansible.builtin.stat:
+    path: "{{ immich.data_dir | dirname }}"
+  register: immich_data_parent
+
+- name: Verify the local application data root
+  ansible.builtin.assert:
+    that:
+      - immich_data_parent.stat.exists
+      - immich_data_parent.stat.isdir
+    fail_msg: >-
+      {{ immich.data_dir | dirname }} must exist on the single Compose host
+
+- name: Inspect the existing Immich database
+  ansible.builtin.stat:
+    path: "{{ immich.data_dir }}/database/PG_VERSION"
+  register: immich_database_version
+
+- name: Require the existing Immich database
+  ansible.builtin.assert:
+    that:
+      - >-
+        (immich.allow_fresh_install | bool)
+        or (
+          (immich_database_version.stat.exists | default(false))
+          and (immich_database_version.stat.isreg | default(false))
+          and (immich_database_version.stat.size | default(0) | int > 0)
+        )
+    fail_msg: >-
+      {{ immich.data_dir }}/database/PG_VERSION must identify an existing
+      database. Correct the migrated data path, or explicitly set
+      immich_allow_fresh_install=true for an intentional new installation.
+
+- name: Inspect existing Immich media markers
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ immich.data_dir }}/upload/upload/.immich"
+    - "{{ immich.data_dir }}/upload/library/.immich"
+    - "{{ immich.data_dir }}/upload/thumbs/.immich"
+    - "{{ immich.data_dir }}/upload/encoded-video/.immich"
+    - "{{ immich.data_dir }}/upload/profile/.immich"
+    - "{{ immich.data_dir }}/backups/.immich"
+  register: immich_media_markers
+
+- name: Require existing Immich media markers
+  ansible.builtin.assert:
+    that:
+      - >-
+        (immich.allow_fresh_install | bool)
+        or (
+          (item.stat.exists | default(false))
+          and (item.stat.isreg | default(false))
+        )
+    fail_msg: >-
+      {{ item.item }} is missing. Correct the migrated media path, or explicitly
+      set immich_allow_fresh_install=true for an intentional new installation.
+  loop: "{{ immich_media_markers.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Validate Immich database credentials
+  ansible.builtin.assert:
+    that:
+      - immich.database.user | string | trim | length > 0
+      - immich.database.password | string | trim | length > 0
+    fail_msg: Immich database credentials must not be empty
+  no_log: true

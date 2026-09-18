@@ -1,0 +1,15 @@
+---
+- name: Run Traefik validation stage
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Run Traefik filesystem stage
+  ansible.builtin.import_tasks: filesystem.yml
+
+- name: Run Traefik preparation stage
+  ansible.builtin.import_tasks: prepare.yml
+
+- name: Run Traefik image pull stage
+  ansible.builtin.import_tasks: pull.yml
+
+- name: Run Traefik deployment stage
+  ansible.builtin.import_tasks: deploy.yml

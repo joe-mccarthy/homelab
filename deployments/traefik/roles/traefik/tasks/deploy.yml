@@ -1,0 +1,36 @@
+---
+- name: Remove legacy Traefik Swarm service before deployment
+  ansible.builtin.include_role:
+    name: remove_legacy_swarm_services
+  vars:
+    remove_legacy_swarm_services_list:
+      - traefik_traefik
+
+- name: Remove existing Traefik container before deployment
+  community.docker.docker_container:
+    name: traefik
+    state: absent
+    keep_volumes: true
+    stop_timeout: 60
+
+- name: Create and start Traefik container
+  community.docker.docker_compose_v2:
+    project_src: "{{ traefik.compose_dir }}"
+    project_name: traefik
+    state: present
+    pull: never
+    recreate: always
+    remove_orphans: true
+    wait: true
+    wait_timeout: 120
+  register: traefik_compose
+
+- name: Verify Traefik is running
+  ansible.builtin.assert:
+    that:
+      - "'traefik' in traefik_compose.containers | map(attribute='Service')"
+      - >-
+        (traefik_compose.containers
+         | rejectattr('State', 'equalto', 'running') | list | length) == 0
+    fail_msg: Docker Compose did not leave the Traefik service running
+  when: not ansible_check_mode

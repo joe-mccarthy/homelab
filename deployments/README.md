@@ -1,19 +1,19 @@
 # Deployments
 
-[![ansible-lint](https://img.shields.io/github/actions/workflow/status/joe-mccarthy/homelab/ansible-linter.yml?style=flat-square&label=ansible%20lint)](https://github.com/joe-mccarthy/homelab/actions/workflows/ansible-linter.yml) [![Ansible](https://img.shields.io/badge/Ansible-Automation-EE0000?logo=ansible&logoColor=white&style=flat-square)](https://docs.ansible.com/) [![Docker Swarm](https://img.shields.io/badge/Docker%20Swarm-Orchestration-2496ED?logo=docker&logoColor=white&style=flat-square)](https://docs.docker.com/engine/swarm/) [![Traefik](https://img.shields.io/badge/Traefik-Reverse%20Proxy-24A1C1?logo=traefikproxy&logoColor=white&style=flat-square)](https://doc.traefik.io/traefik/)
+[![ansible-lint](https://img.shields.io/github/actions/workflow/status/joe-mccarthy/homelab/ansible-linter.yml?style=flat-square&label=ansible%20lint)](https://github.com/joe-mccarthy/homelab/actions/workflows/ansible-linter.yml) [![Ansible](https://img.shields.io/badge/Ansible-Automation-EE0000?logo=ansible&logoColor=white&style=flat-square)](https://docs.ansible.com/) [![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white&style=flat-square)](https://docs.docker.com/compose/) [![Docker Swarm](https://img.shields.io/badge/Docker%20Swarm-Legacy-2496ED?logo=docker&logoColor=white&style=flat-square)](https://docs.docker.com/engine/swarm/) [![Traefik](https://img.shields.io/badge/Traefik-Reverse%20Proxy-24A1C1?logo=traefikproxy&logoColor=white&style=flat-square)](https://doc.traefik.io/traefik/)
 
-The `deployments` directory contains playbooks and associated files for deploying various services within the home lab cluster. Each deployment is designed to be standalone, meaning they can be deployed independently of one another. However, it is assumed that [Traefik](traefik/README.md) has been or will be deployed, as all deployments rely on Traefik for proxying and certificate management.
+The `deployments` directory contains standalone Ansible playbooks for services in the home lab. Newer deployments run with Docker Compose on the single `nfs_servers` host; legacy deployments still use Docker Swarm. Web applications rely on [Traefik](traefik/README.md), while background services such as DDNS do not.
 
 ## Overview
 
 This directory includes deployments for a variety of services, ranging from personal applications to essential cluster management tools. These deployments are designed to:
-- Simplify the process of deploying and managing services in a Docker Swarm environment.
+- Simplify deployment and management across the current Compose and legacy Swarm environments.
 - Provide examples of best practices for deploying containerized applications.
 - Ensure services are configured with proper proxying, DNS resolution, and HTTPS certificates.
 
-## Temporary Compose Files
+## Compose Files
 
-Deployments that use the shared `copy_and_deploy` role render Docker Compose templates to `/home/docker-compose/docker-compose.yaml` before applying them with `community.docker.docker_stack`. Some templates include vault-backed values that are still present in the rendered compose file, so the shared role keeps the working directory private to `root`, writes the compose file with `0600` permissions, suppresses template output with `no_log`, and removes the temporary directory in an `always` block after deployment.
+Single-host Compose deployments retain root-owned projects beneath `/opt/<service>` for normal `docker compose` operations. Legacy deployments that use the shared `copy_and_deploy` role still render a temporary `/home/docker-compose/docker-compose.yaml`, apply it with `community.docker.docker_stack`, and remove it afterward.
 
 ## Deployments
 
@@ -30,7 +30,7 @@ Deployments that use the shared `copy_and_deploy` role render Docker Compose tem
 ### 3. [DDNS](ddns/README.md)
 - **Description**: Dynamically updates DNS records to reflect the public IP address of the home lab's internet gateway. This ensures services are accessible via domain names.
 - **Use Case**: Useful for home labs with dynamic IP addresses.
-- **Dependencies**: Requires a DNS provider that supports API-based updates (e.g., Cloudflare).
+- **Dependencies**: Runs with Docker Compose on the single `nfs_servers` host and requires a scoped Cloudflare API token. It does not use Traefik.
 
 ### 4. [Dozzle](dozzle/README.md)
 - **Description**: Deploys Dozzle, a lightweight real-time web UI for viewing Docker container logs across the swarm.
@@ -45,7 +45,7 @@ Deployments that use the shared `copy_and_deploy` role render Docker Compose tem
 ### 6. [Home Assistant](home-assistant/README.md)
 - **Description**: Deploys Home Assistant, an open-source platform for home automation, with Zigbee2MQTT, Mosquitto, and Matter Server for Wi-Fi Matter devices.
 - **Use Case**: Perfect for managing and automating smart home devices.
-- **Dependencies**: Requires Traefik for proxying and certificate management. Matter Server also requires working LAN IPv6 and mDNS/multicast on the single node labelled `matter=true` and `storage=true`.
+- **Dependencies**: Runs with Docker Compose on the single `nfs_servers` host and requires local Traefik proxying, LAN IPv6/mDNS, and a local or TCP-connected Zigbee coordinator.
 
 ### 7. [Immich](immich/README.md)
 - **Description**: Immich is a high-performance self-hosted photo and video management solution that serves as a complete alternative to Google Photos. Features include:
@@ -59,32 +59,37 @@ Deployments that use the shared `copy_and_deploy` role render Docker Compose tem
   - **immich-redis**: Cache and session storage for performance
   - **immich-machine-learning**: AI processing for smart features
 - **Use Case**: Ideal for users looking to manage and organize their photo and video collections with advanced AI capabilities.
+- **Dependencies**: Runs with Docker Compose on the single `nfs_servers` host and requires local persistent storage plus the external Traefik `proxy` network (a local bridge or an attachable Swarm overlay).
 
-### 8. [NFS Backup](nfs-backup/README.md)
-- **Description**: Provides enterprise-grade automated backups for Docker Swarm NFS shared volumes using Restic with S3 storage backend. Implements a comprehensive backup strategy with three coordinated services:
-  - **backup**: Creates hourly encrypted incremental backups
-  - **prune**: Manages retention policies (keeping 24 latest, 7 daily, 4 weekly, and 4 monthly backups)
-  - **check**: Performs regular integrity verification of the backup repository
+### 8. [Paperless](paperless/README.md)
+- **Description**: Deploys Paperless-ngx with Redis, Gotenberg, and Tika for document management, OCR, and Office document conversion.
+- **Use Case**: Ideal for searchable archival and automated ingestion of scanned documents.
+- **Dependencies**: Runs with Docker Compose on the single `nfs_servers` host and requires local persistent storage plus the external Traefik `proxy` network (a local bridge or an attachable Swarm overlay).
+
+### 9. [NFS Backup](nfs-backup/README.md)
+- **Description**: Runs encrypted Restic backups to S3 from short-lived containers scheduled by systemd; no backup container remains running between jobs.
+- **Schedule**: Daily backup at 00:00, weekly retention/prune, and weekly integrity checking.
+- **Retention**: Keeps the latest 24 hours plus 14 daily, 8 weekly, 12 monthly, and 3 yearly snapshots.
 - **Use Case**: Critical data protection for containerized applications with secure off-site storage
 - **Security**: All backups are strongly encrypted and services operate with least-privilege principles
-- **Dependencies**: Requires NFS volumes mounted at `/exports/docker` and S3-compatible storage credentials
+- **Dependencies**: Requires `/exports/docker` on the NFS server, Docker, systemd, and S3-compatible storage credentials
 
-### 9. [Omni Tools](omni/README.md)
+### 10. [Omni Tools](omni/README.md)
 - **Description**: Deploys Omni Tools, a self-hosted browser-based collection of everyday utility tools. It provides a lightweight, privacy-friendly alternative to scattered online services.
 - **Use Case**: Ideal for users who want a single, self-hosted destination for common utility tasks without relying on third-party websites.
 - **Dependencies**: Requires Traefik for proxying and certificate management.
 
-### 10. [Personal Blog](blog/README.md)
+### 11. [Personal Blog](blog/README.md)
 - **Description**: Deploys multiple instances of a private Docker image for a personal blog. This deployment demonstrates how to handle private registries and update services when new image versions become available.
 - **Use Case**: Ideal for hosting a personal website or blog with high availability.
 - **Dependencies**: Requires Traefik for proxying and certificate management.
 
-### 11. [Portainer](portainer/README.md)
+### 12. [Portainer](portainer/README.md)
 - **Description**: Provides a web-based interface for managing Docker and Docker Swarm. While deployments are managed by Ansible, Portainer offers a convenient UI for monitoring and manual management.
 - **Use Case**: Useful for visualizing and managing the cluster's status and activity.
 - **Dependencies**: Requires Traefik for proxying and certificate management.
 
-### 12. [Traefik](traefik/README.md)
+### 13. [Traefik](traefik/README.md)
 - **Description**: Acts as a reverse proxy for other services, enabling name resolution instead of relying on IP addresses and ports. It also integrates with DNS providers to issue valid HTTPS certificates.
 - **Use Case**: A critical component for managing traffic and securing connections in the cluster.
 - **Dependencies**: None, but it is recommended to deploy Traefik first.
@@ -94,32 +99,32 @@ Deployments that use the shared `copy_and_deploy` role render Docker Compose tem
 | Service | Component | Version |
 |---------|-----------|:-------:|
 | [Cioban](cioban/README.md) | cioban | `0.17.14` |
-| [DDNS](ddns/README.md) | cloudflare-ddns | `1.15.1` |
+| [DDNS](ddns/README.md) | cloudflare-ddns | `1.17.0` |
 | [Dozzle](dozzle/README.md) | dozzle | `latest` |
 | [Gitea](gitea/README.md) | server | `1.25.5` |
 | [Gitea](gitea/README.md) | act_runner | `0.2.12` |
-| [Home Assistant](home-assistant/README.md) | home-assistant | `2026.7.2` |
+| [Home Assistant](home-assistant/README.md) | home-assistant | `2026.8.3` |
 | [Home Assistant](home-assistant/README.md) | matter-server | `1.4.0` |
-| [Home Assistant](home-assistant/README.md) | zigbee2mqtt | `2.12.1` |
+| [Home Assistant](home-assistant/README.md) | zigbee2mqtt | `2.13.0` |
 | [Home Assistant](home-assistant/README.md) | mosquitto | `2.1.2-alpine` |
-| [Immich](immich/README.md) | immich-server | `v2.6.1` |
-| [Immich](immich/README.md) | immich-machine-learning | `v2.6.1` |
-| [NFS Backup](nfs-backup/README.md) | restic | `1.8.2` |
-| [Paperless](paperless/README.md) | paperless-ngx | `2.20.13` |
-| [Paperless](paperless/README.md) | redis | `8.6.1` |
-| [Paperless](paperless/README.md) | gotenberg | `8.28.0` |
-| [Paperless](paperless/README.md) | tika | `3.2.3.0` |
+| [Immich](immich/README.md) | immich-server | `v3.1.0` |
+| [Immich](immich/README.md) | immich-machine-learning | `v3.1.0` |
+| [NFS Backup](nfs-backup/README.md) | resticker | `1.8.2` |
+| [Paperless](paperless/README.md) | paperless-ngx | `3.1.0` |
+| [Paperless](paperless/README.md) | redis | `8.10.1` |
+| [Paperless](paperless/README.md) | gotenberg | `8.36.0` |
+| [Paperless](paperless/README.md) | tika | `3.3.1.0` |
 | [Portainer](portainer/README.md) | portainer-ce | `2.39.1` |
 | [Portainer](portainer/README.md) | portainer-agent | `2.39.1` |
 | [Omni Tools](omni/README.md) | omni-tools | `latest` |
-| [Traefik](traefik/README.md) | traefik | `3.6.11` |
+| [Traefik](traefik/README.md) | traefik | `3.7.12` |
 
 ## Prerequisites
 
 Before deploying any services, ensure the following:
-1. **Docker Swarm**:
-   - The cluster must be initialized as a Docker Swarm.
-   - Nodes should be joined to the Swarm and properly configured.
+1. **Docker Runtime**:
+   - Compose deployments require exactly one host in `nfs_servers` with Docker Engine and the Compose v2 plugin.
+   - Legacy Swarm deployments still require an initialized cluster and a manager node.
 
 2. **Traefik Deployment**:
    - Deploy Traefik first to handle proxying and certificate management for other services.

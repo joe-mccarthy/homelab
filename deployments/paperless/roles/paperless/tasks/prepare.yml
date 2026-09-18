@@ -1,0 +1,51 @@
+---
+- name: Ensure Docker Compose plugin is installed
+  ansible.builtin.package:
+    name: docker-compose-plugin
+    state: present
+
+- name: Ensure Docker is enabled and running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Validate Paperless proxy network
+  ansible.builtin.include_role:
+    name: validate_proxy_network
+  vars:
+    validate_proxy_network_name: "{{ paperless.proxy_network }}"
+
+- name: Write Paperless secrets
+  ansible.builtin.copy:
+    content: "{{ item.value }}"
+    dest: "{{ paperless.compose_dir }}/secrets/{{ item.name }}"
+    mode: '0444'
+    owner: root
+    group: root
+  loop:
+    - name: paperless_secret_key
+      value: "{{ paperless.secret_key }}"
+    - name: paperless_database_password
+      value: "{{ paperless.database.password }}"
+  no_log: true
+
+- name: Render Paperless Compose project
+  ansible.builtin.template:
+    src: templates/docker-compose.yaml
+    dest: "{{ paperless.compose_dir }}/compose.yaml"
+    mode: '0600'
+    owner: root
+    group: root
+  no_log: true
+
+- name: Validate rendered Paperless Compose project
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --project-directory
+      - "{{ paperless.compose_dir }}"
+      - config
+      - --quiet
+  changed_when: false

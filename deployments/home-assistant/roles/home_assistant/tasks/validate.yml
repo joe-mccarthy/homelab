@@ -1,0 +1,38 @@
+---
+- name: Validate required Home Assistant configuration
+  ansible.builtin.assert:
+    that:
+      - home_assistant is defined
+      - (home_assistant | default({})).data_dir | default('') | length > 1
+      - (home_assistant | default({})).data_dir | default('') is match('^/')
+      - (home_assistant | default({})).compose_dir | default('') | length > 1
+      - (home_assistant | default({})).compose_dir | default('') is match('^/')
+      - (home_assistant | default({})).proxy_network | default('') | length > 0
+      - (home_assistant | default({})).proxy | default('') | length > 0
+      - (home_assistant | default({})).mqtt_server | default('') | length > 0
+      - >-
+        (home_assistant | default({})).zigbee_serial_port
+        | default('') | length > 0
+    fail_msg: >-
+      Home Assistant paths must be absolute and all required proxy, MQTT,
+      network, and Zigbee settings must be non-empty.
+  no_log: true
+
+- name: Inspect managed Home Assistant directory paths
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ home_assistant.data_dir | dirname }}"
+    - "{{ home_assistant.data_dir }}"
+    - "{{ home_assistant.compose_dir | dirname }}"
+    - "{{ home_assistant.compose_dir }}"
+  register: home_assistant_managed_directories
+
+- name: Reject non-directory managed Home Assistant paths
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (item.stat.isdir | default(false))
+    fail_msg: "{{ item.item }} exists but is not a directory."
+  loop: "{{ home_assistant_managed_directories.results }}"
+  loop_control:
+    label: "{{ item.item }}"

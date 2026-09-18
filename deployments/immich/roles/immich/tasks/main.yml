@@ -1,0 +1,15 @@
+---
+- name: Run Immich validation stage
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Run Immich filesystem stage
+  ansible.builtin.import_tasks: filesystem.yml
+
+- name: Run Immich preparation stage
+  ansible.builtin.import_tasks: prepare.yml
+
+- name: Run Immich image pull stage
+  ansible.builtin.import_tasks: pull.yml
+
+- name: Run Immich deployment stage
+  ansible.builtin.import_tasks: deploy.yml

@@ -1,0 +1,63 @@
+---
+- name: Create Home Assistant data directory
+  ansible.builtin.file:
+    path: "{{ home_assistant.data_dir }}"
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: Create service data directories
+  ansible.builtin.file:
+    path: "{{ home_assistant.data_dir }}/{{ item }}"
+    state: directory
+    mode: '0755'
+    owner: nobody
+    group: nogroup
+  loop:
+    - mosquitto
+    - themes
+    - zigbee2mqtt
+    - zigbee2mqtt/data
+
+- name: Create Matter Server data directory
+  ansible.builtin.file:
+    path: "{{ home_assistant.data_dir }}/matter-server/data"
+    state: directory
+    mode: '0755'
+    owner: '1000'
+    group: '1000'
+
+- name: Initialize Home Assistant configuration files
+  ansible.builtin.file:
+    path: "{{ home_assistant.data_dir }}/{{ item }}"
+    state: touch
+    mode: '0644'
+    access_time: preserve
+    modification_time: preserve
+  loop:
+    - automations.yaml
+    - scenes.yaml
+    - scripts.yaml
+
+- name: Deploy initial Home Assistant configuration
+  ansible.builtin.template:
+    src: templates/configuration.yaml
+    dest: "{{ home_assistant.data_dir }}/configuration.yaml"
+    mode: '0644'
+    force: false
+
+- name: Deploy initial Zigbee2MQTT configuration
+  ansible.builtin.template:
+    src: templates/zigbee/configuration.yaml
+    dest: "{{ home_assistant.data_dir }}/zigbee2mqtt/data/configuration.yaml"
+    mode: '0644'
+    force: false
+
+- name: Create Home Assistant Compose project directory
+  ansible.builtin.file:
+    path: "{{ home_assistant.compose_dir }}"
+    state: directory
+    mode: '0700'
+    owner: root
+    group: root

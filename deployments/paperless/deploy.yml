@@ -1,34 +1,30 @@
-# Playbook: Deploy Paperless
-#
-# This playbook deploys the Paperless stack onto a Docker Swarm manager node.
-# It is intended to be executed from the Ansible control machine and targets the
-# manager group, executing deployment tasks on one selected manager host.
-#
-# High-level flow:
-#   1) Ensure NFS storage paths exist and are writable (via the `check_nfs` role).
-#   2) Render the Paperless docker-compose file and deploy it as a Docker stack
-#      (via the `deploy_paperless` role).
-#
-# Notes:
-#   - This playbook does NOT initialize or manage the swarm itself. It assumes a
-#     running swarm with at least one manager already available.
-#   - `become: true` is required because Docker operations and directory creation
-#     often require elevated privileges on the host.
+---
+- name: Validate Paperless target
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: Require a Paperless target
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target | default('') | string | trim | length > 0
+        fail_msg: >-
+          Pass an inventory hostname, DNS name, or IP address with
+          -e target=<host-or-address>.
+
+    - name: Add Paperless target to the temporary deployment group
+      ansible.builtin.add_host:
+        name: "{{ target | string | trim }}"
+        groups: deployment_target
 
 - name: Deploy Paperless
-  hosts: manager
-  order: shuffle
+  hosts: deployment_target
   become: true
-  vars:
-    # Use one selected manager host for deployment to avoid `run_once` strategy caveats.
-    paperless_deploy_host: "{{ ansible_play_hosts_all | first }}"
-  tasks:
-    - name: Ensure Paperless NFS paths exist
-      ansible.builtin.include_role:
-        name: check_nfs
-      when: inventory_hostname == paperless_deploy_host
+  gather_facts: false
+  any_errors_fatal: true
 
-    - name: Deploy Paperless stack
+  tasks:
+    - name: Run staged Paperless deployment
       ansible.builtin.include_role:
-        name: deploy_paperless
-      when: inventory_hostname == paperless_deploy_host
+        name: paperless

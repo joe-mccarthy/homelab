@@ -1,199 +1,128 @@
-# Docker Compose template for Paperless (Docker Swarm stack)
-#
-# This is a Jinja2/Ansible template rendered by the `deploy_paperless` role.
-# The resulting file is deployed as a Docker stack via `docker stack deploy`.
-#
-# How to use:
-#   1) Ensure the Target host(s) are members of a running Docker Swarm.
-#   2) Ensure the `proxy` overlay network exists (usually created by Traefik).
-#   3) Run the playbook at `deployments/paperless/deploy.yml` from the Ansible control node.
-#
-# Variables:
-#   - `paperless.ports.*` (from group_vars/all.yml) controls the host ports published
-#     for each service.
-#   - `paperless.volumes.*` provides host paths (typically on NFS) that are bound into
-#     the containers.
-#   - `vault.shared.general.domain` defines the DNS base used by Traefik to route traffic.
-#
-# Tip: To preview what this template renders to, run the Ansible playbook with
-# `--check --diff` and inspect the generated compose file in
-# `/home/docker-compose/paperless/docker-compose.yaml`.
-#
-# Note: This compose file is intended for Docker Swarm (stack deploy). It uses
-# overlay networking and service labels for Traefik integration.
-#
-# WARNING: The `container_name` fields are primarily for easier debugging. In a
-# Swarm stack, service discovery happens via the service name, not the container
-# name; container_name is not required and may cause scheduling restrictions.
-
-version: '3.8'
+---
+# Traefik label keys and Jinja expressions are intentionally kept intact.
+# yamllint disable rule:line-length
+name: paperless
 
 services:
-
-  # Redis is used as the Paperless message broker (via redis://).
-  #
-  # Paperless will store queues and job state in Redis. If Redis is not responsive,
-  # Paperless may fail to process ingested documents.
-  #
-  # The service is reachable via the DNS name `paperless-broker` on the overlay
-  # network, and the app uses this name in the `PAPERLESS_REDIS` env var.
   paperless-broker:
-    image: docker.io/library/redis:8
-    container_name: paperless-redis  # helpful for debugging on individual nodes
+    container_name: paperless-redis
+    image: "docker.io/library/redis:{{ paperless.versions.broker }}"
     restart: unless-stopped
-    networks:
-      - paperless
     volumes:
-      - redisdata:/data  # persistence for broker state
-    # Swarm-only deployment settings (ignored by plain docker-compose).
-    deploy:
-      mode: replicated
-      replicas: 1
-      labels:
-        - "traefik.enable=false"  # not exposed via Traefik
+      - "{{ paperless.data_dir }}/broker:/data"
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
 
-  # Paperless application service.
-  # This is the main web UI/API and uses Redis, Tika, and Gotenberg for processing.
-  paperless:
-    image: ghcr.io/paperless-ngx/paperless-ngx:latest
+  paperless-database:
+    container_name: paperless-postgres
+    image: "docker.io/library/postgres:{{ paperless.versions.database }}"
     restart: unless-stopped
-    container_name: paperless  # optional; can be removed if it causes scheduling restrictions
-    depends_on:
-      # NOTE: In Docker Swarm, depends_on only controls startup order, not readiness.
-      # The Paperless app may still start before its dependencies are ready.
-      - paperless-broker
-      - paperless-gotenberg
-      - paperless-tika
-    networks:
-      - proxy    # Traefik ingress network (routes host traffic into the stack)
-      - paperless  # internal network for backend communications
     volumes:
-      # Persistent storage locations (bind mounts backed by host/NFS paths)
-      - data:/usr/src/paperless/data
-      - media:/usr/src/paperless/media
-      - export:/usr/src/paperless/export
-      - consume:/usr/src/paperless/consume
-    # Swarm-only deployment settings (ignored by plain docker-compose).
-    deploy:
-      mode: replicated
-      replicas: 1
-      labels:
-        - "traefik.enable=true"
-        - "traefik.http.routers.paperless.entrypoints=web"
-        - "traefik.http.routers.paperless.rule=Host(`paperless.{{ vault.shared.general.domain }}`)"
-        - "traefik.http.middlewares.paperless-https-redirect.redirectscheme.scheme=https"
-        - "traefik.http.routers.paperless.middlewares=paperless-https-redirect"
-        - "traefik.http.routers.paperless-secure.entrypoints=websecure"
-        - "traefik.http.routers.paperless-secure.rule=Host(`paperless.{{ vault.shared.general.domain }}`)"
-        - "traefik.http.routers.paperless-secure.tls=true"
-        - "traefik.http.routers.paperless-secure.service=paperless"
-        - "traefik.http.routers.paperless-secure.tls.certresolver=letsencrypt"
-        - "traefik.http.services.paperless.loadbalancer.server.port=8000"
-        - "traefik.docker.network=proxy"
+      - "{{ paperless.database.data_dir }}:/var/lib/postgresql"
+    secrets:
+      - paperless_database_password
     environment:
-      # Where the app reads its configuration file from.
-      PAPERLESS_CONFIGURATION_PATH: ./paperless.conf
-      # Redis backend for job queueing.
+      POSTGRES_DB: "{{ paperless.database.name }}"
+      POSTGRES_USER: "{{ paperless.database.user }}"
+      POSTGRES_PASSWORD_FILE: /run/secrets/paperless_database_password
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  paperless:
+    container_name: paperless
+    image: >-
+      ghcr.io/paperless-ngx/paperless-ngx:{{ paperless.versions.app }}
+    restart: unless-stopped
+    networks:
+      - default
+      - proxy
+    volumes:
+      - "{{ paperless.data_dir }}/data:/usr/src/paperless/data"
+      - "{{ paperless.data_dir }}/media:/usr/src/paperless/media"
+      - "{{ paperless.data_dir }}/export:/usr/src/paperless/export"
+      - "{{ paperless.data_dir }}/consume:/usr/src/paperless/consume"
+    secrets:
+      - paperless_secret_key
+      - paperless_database_password
+    environment:
+      PAPERLESS_SECRET_KEY_FILE: /run/secrets/paperless_secret_key
       PAPERLESS_REDIS: redis://paperless-broker:6379
-      # The externally reachable URL for the Paperless UI.
-      PAPERLESS_URL: https://paperless.{{ vault.shared.general.domain }}
-      # Enable Tika integration for document parsing.
-      PAPERLESS_TIKA_ENABLED: 1
-      # Endpoints for Tika+Gotenberg (used to extract text and render PDFs).
+      PAPERLESS_DBENGINE: postgresql
+      PAPERLESS_DBHOST: paperless-database
+      PAPERLESS_DBPORT: '5432'
+      PAPERLESS_DBNAME: "{{ paperless.database.name }}"
+      PAPERLESS_DBUSER: "{{ paperless.database.user }}"
+      PAPERLESS_DBPASS_FILE: /run/secrets/paperless_database_password
+      PAPERLESS_URL: "https://paperless.{{ vault.shared.general.domain }}"
+      PAPERLESS_ALLOWED_HOSTS: >-
+        paperless.{{ vault.shared.general.domain }},{{ vault.shared.general.domain }},.{{ vault.shared.general.domain }}
+      PAPERLESS_TIKA_ENABLED: '1'
       PAPERLESS_TIKA_GOTENBERG_ENDPOINT: http://paperless-gotenberg:3000
       PAPERLESS_TIKA_ENDPOINT: http://paperless-tika:9998
-      # Allowed hosts to prevent Host header spoofing in Django.
-      PAPERLESS_ALLOWED_HOSTS: paperless.{{ vault.shared.general.domain }},{{ vault.shared.general.domain }},.{{ vault.shared.general.domain }}
+      PAPERLESS_OCR_MODE: auto
+      PAPERLESS_ARCHIVE_FILE_GENERATION: always
+      PAPERLESS_CONSUMER_DELETE_DUPLICATES: 'true'
+      USERMAP_UID: "{{ paperless.uid }}"
+      USERMAP_GID: "{{ paperless.gid }}"
+    depends_on:
+      paperless-broker:
+        condition: service_healthy
+      paperless-database:
+        condition: service_healthy
+      paperless-gotenberg:
+        condition: service_started
+      paperless-tika:
+        condition: service_started
+    labels:
+      traefik.enable: 'true'
+      traefik.http.routers.paperless.entrypoints: web
+      traefik.http.routers.paperless.rule: >-
+        Host(`paperless.{{ vault.shared.general.domain }}`)
+      traefik.http.middlewares.paperless-https-redirect.redirectscheme.scheme: >-
+        https
+      traefik.http.routers.paperless.middlewares: paperless-https-redirect
+      traefik.http.routers.paperless-secure.entrypoints: websecure
+      traefik.http.routers.paperless-secure.rule: >-
+        Host(`paperless.{{ vault.shared.general.domain }}`)
+      traefik.http.routers.paperless-secure.tls: 'true'
+      traefik.http.routers.paperless-secure.service: paperless
+      traefik.http.routers.paperless-secure.tls.certresolver: letsencrypt
+      traefik.http.services.paperless.loadbalancer.server.port: '8000'
+      traefik.docker.network: "{{ paperless.proxy_network }}"
 
-  # Gotenberg provides PDF rendering/conversion used by Paperless.
-  #
-  # It's typically only called from within the Paperless container (via the
-  # internal overlay network) and does not need to be exposed through Traefik.
   paperless-gotenberg:
-    image: docker.io/gotenberg/gotenberg:8.27
-    restart: unless-stopped
     container_name: paperless-gotenberg
-    networks:
-      - paperless
-    # Swarm-only deployment settings (ignored by plain docker-compose).
-    deploy:
-      mode: replicated
-      replicas: 1
-      labels:
-        - "traefik.enable=false"  # not exposed via Traefik
-    command:
-      - "gotenberg"
-      - "--chromium-disable-javascript=true"  # reduces resource usage / security surface
-      - "--chromium-allow-list=file:///tmp/.*"  # restricts file access to /tmp
-
-  # Tika is used for document parsing/metadata extraction.
-  # It is not exposed via Traefik; Paperless talks to it over the overlay network.
-  paperless-tika:
-    image: docker.io/apache/tika:latest
-    container_name: paperless-tika
+    image: >-
+      docker.io/gotenberg/gotenberg:{{ paperless.versions.gotenberg }}
     restart: unless-stopped
-    networks:
-      - paperless
-    # Swarm-only deployment settings (ignored by plain docker-compose).
-    deploy:
-      mode: replicated
-      replicas: 1
-      labels:
-        - "traefik.enable=false"  # not exposed via Traefik
+    command:
+      - gotenberg
+      - --chromium-disable-javascript=true
+      - --chromium-allow-list=file:///tmp/.*
 
-# Persistent storage volumes backed by host paths (typically NFS mounts).
-#
-# Each volume is mapped to a path provided by group variables. The `deploy_paperless`
-# role ensures these directories exist and have suitable permissions.
-#
-# NOTE: Bind mounting directories like this means the host must have the
-# directories created before the stack starts (see the `check_nfs` role).
-volumes:
-  redisdata:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: {{ paperless.volumes.broker }}
+  paperless-tika:
+    container_name: paperless-tika
+    image: "docker.io/apache/tika:{{ paperless.versions.tika }}"
+    restart: unless-stopped
 
-  # Application data directory (PostgreSQL, configuration, etc.)
-  data:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: {{ paperless.volumes.paperless.data }}
-
-  # Uploaded media (scanned PDFs, images, etc.)
-  media:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: {{ paperless.volumes.paperless.media }}
-
-  # Export output directory (for user downloads / exports)
-  export:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: {{ paperless.volumes.paperless.export }}
-
-  # Import/consume directory used by ingest workers.
-  consume:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: {{ paperless.volumes.paperless.consume }}
-
-# Networks used by this stack.
-# - proxy: external network used by Traefik for ingress routing.
-# - paperless: internal overlay network for service communication.
 networks:
+  default:
+    name: paperless_compose
   proxy:
     external: true
-  paperless:
-    driver: overlay
-    internal: true
+    name: "{{ paperless.proxy_network }}"
+
+secrets:
+  paperless_secret_key:
+    file: ./secrets/paperless_secret_key
+  paperless_database_password:
+    file: ./secrets/paperless_database_password

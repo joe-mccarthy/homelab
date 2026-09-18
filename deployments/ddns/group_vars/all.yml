@@ -1,15 +1,22 @@
 ---
 ddns:
-  # Cloudflare API token — scoped to DNS edit permissions only (from Ansible Vault)
+  # Retained Docker Compose project
+  compose_dir: /opt/ddns
+
+  # Runtime identity used by the upstream image
+  uid: '1000'
+  gid: '1000'
+
+  # Cloudflare API token scoped to DNS edit permissions (from Ansible Vault)
   cf_token: "{{ vault.shared.cloudflare.token }}"
 
   # Comma-separated list of domains to keep updated (from Ansible Vault)
   dns_domains: "{{ vault.services.ddns.dns_domains }}"
 
   # Pinned image tag for reproducible deployments
-  version: "1.15.1"
+  version: "1.17.0"
 
 # Notes:
-# - vault.shared.cloudflare.token and vault.services.ddns.dns_domains must be defined in Ansible Vault.
-# - cf_token should be scoped to the minimum required permissions (DNS zone edit).
-# - This file must not contain plaintext secrets. Use: ansible-vault edit group_vars/all.yml
+# - The play targets the host passed with -e target=<host-or-address>.
+# - Define both vault lookups in the encrypted vault loaded by the playbook.
+# - The token should have only DNS zone read and edit permissions.

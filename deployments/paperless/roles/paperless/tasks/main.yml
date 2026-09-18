@@ -1,0 +1,15 @@
+---
+- name: Validate Paperless deployment
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Prepare Paperless filesystem
+  ansible.builtin.import_tasks: filesystem.yml
+
+- name: Prepare Paperless Compose project
+  ansible.builtin.import_tasks: prepare.yml
+
+- name: Pull Paperless images
+  ansible.builtin.import_tasks: pull.yml
+
+- name: Deploy Paperless
+  ansible.builtin.import_tasks: deploy.yml

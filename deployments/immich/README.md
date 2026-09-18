@@ -1,260 +1,132 @@
-# Immich Photo Management Deployment
+# Immich Deployment
 
-[![Ansible](https://img.shields.io/badge/Ansible-Automation-EE0000?logo=ansible&logoColor=white&style=flat-square)](https://docs.ansible.com/) [![Docker Swarm](https://img.shields.io/badge/Docker%20Swarm-Orchestration-2496ED?logo=docker&logoColor=white&style=flat-square)](https://docs.docker.com/engine/swarm/) [![Traefik](https://img.shields.io/badge/Traefik-HTTPS%20Access-24A1C1?logo=traefikproxy&logoColor=white&style=flat-square)](https://doc.traefik.io/traefik/) ![Machine Learning](https://img.shields.io/badge/Machine%20Learning-Enabled-8A2BE2?style=flat-square) ![Immich](https://img.shields.io/badge/Immich-v2.6.1-5C5C5C?style=flat-square)
+[![Ansible](https://img.shields.io/badge/Ansible-Automation-EE0000?logo=ansible&logoColor=white&style=flat-square)](https://docs.ansible.com/) [![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white&style=flat-square)](https://docs.docker.com/compose/) [![Traefik](https://img.shields.io/badge/Traefik-HTTPS-24A1C1?logo=traefikproxy&logoColor=white&style=flat-square)](https://doc.traefik.io/traefik/) ![Immich](https://img.shields.io/badge/Immich-v3.1.0-5C5C5C?style=flat-square)
 
-A comprehensive Docker Swarm deployment for Immich, a high-performance self-hosted photo and video management solution. This deployment provides a complete alternative to Google Photos with AI-powered features including face recognition, object detection, and intelligent search capabilities.
+An Ansible-managed, single-host Docker Compose deployment of Immich, PostgreSQL, Valkey, and Immich Machine Learning.
 
-## Table of Contents
+## Services
 
-- [Overview](#overview)
-- [Architecture](#architecture)
-- [Prerequisites](#prerequisites)
-- [Configuration](#configuration)
-- [Deployment](#deployment)
-- [Post-Deployment](#post-deployment)
-- [Security Considerations](#security-considerations)
-- [File Structure](#file-structure)
-- [Support and Resources](#support-and-resources)
+| Service | Image | Purpose |
+| --- | --- | --- |
+| `immich-server` | `ghcr.io/immich-app/immich-server:v3.1.0` | Web application, API, and background jobs. |
+| `immich-machine-learning` | `ghcr.io/immich-app/immich-machine-learning:v3.1.0` | Face recognition and smart search. |
+| `immich-redis` | `valkey/valkey:9` pinned by digest | Cache and job coordination. |
+| `immich-database` | Immich PostgreSQL 14 image pinned by digest | Metadata and vector search database. |
 
-## Overview
+All containers run on the host passed through `-e target=...`. Docker Swarm
+placement is not used. The private project network is local, while the external
+proxy network can be an attachable overlay on a Swarm manager.
 
-Immich is a modern photo and video management application that offers:
+The server joins the external `proxy` network for Traefik. Database, Valkey, and
+machine learning traffic remains on the private Compose project network.
 
-- **Web Interface**: Intuitive browser-based photo organization and viewing
-- **Mobile Apps**: Automatic photo backup from iOS and Android devices
-- **AI Features**: Face recognition, object detection, and smart search
-- **Timeline View**: Chronological organization of your media library
-- **Album Management**: Create and share photo albums
-- **External Sharing**: Share photos and albums with external users
-- **Metadata Extraction**: Automatic EXIF data processing and location mapping
+## Paths
 
-## Architecture
+| Path | Purpose |
+| --- | --- |
+| `/opt/immich/compose.yaml` | Retained Compose project rendered by Ansible. |
+| `/opt/immich/secrets/` | Root-protected database credential sources. |
+| `/exports/docker/immich/upload` | Photo and video library mounted at Immich's `/data`. |
+| `/exports/docker/immich/backups` | Immich database backups mounted at `/data/backups`. |
+| `/exports/docker/immich/database` | PostgreSQL data. |
+| `/exports/docker/immich/ml` | Downloaded machine learning models. |
 
-The deployment consists of four interconnected services:
-
-```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Traefik       │────│  Immich Server   │────│  PostgreSQL     │
-│  (Reverse Proxy)│    │  (Web App/API)   │    │  (Database)     │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-                                │                        │
-                       ┌─────────────────┐    ┌─────────────────┐
-                       │     Redis       │    │  Machine        │
-                       │   (Cache)       │    │  Learning       │
-                       └─────────────────┘    └─────────────────┘
-```
-
-### Services
-
-- **immich-server**: Main application providing web interface and REST API
-- **immich-database**: PostgreSQL with vector extensions for AI-powered search
-- **immich-redis**: High-performance cache for sessions and temporary data
-- **immich-machine-learning**: TensorFlow-based AI processing for smart features
+`immich.data_dir` and `immich.compose_dir` can be changed in [`group_vars/all.yml`](group_vars/all.yml).
 
 ## Prerequisites
 
-### Infrastructure Requirements
+- A reachable inventory hostname, DNS name, or IP address passed as `target`.
+- Docker Engine and the Docker Compose v2 plugin on that host.
+- The `community.docker` collection from [`requirements.yml`](../../requirements.yml).
+- `/exports/docker` on local storage, or `immich.data_dir` changed to another local path.
+- The machine bootstrap's external `proxy` network.
+- A local Traefik container attached to that bridge or attachable overlay.
+- DNS for `immich.<domain>` directed to Traefik.
+- At least 6 GB RAM; 8 GB and four CPU cores are recommended.
+- An x86-64-v2 or newer CPU when using x86 machine-learning images.
 
-- **Docker Swarm**: Active swarm cluster with at least one manager node
-- **NFS Storage**: Network file system mounted at `/mnt/nfs/docker`
-- **Traefik**: Reverse proxy with Let's Encrypt certificate resolver
-- **DNS**: Properly configured domain pointing to your cluster
+PostgreSQL must not run on NFS. The play checks the database filesystem against the local filesystems supported by the pinned Immich image before starting Compose.
 
-### System Requirements
+## Existing Data
 
-- **CPU**: Minimum 2 cores (4+ recommended for AI features)
-- **RAM**: Minimum 4GB (8GB+ recommended)
-- **Storage**: Depends on photo library size (plan for growth)
-- **Network**: Stable connection for NFS and external access
+The former template mounted the host upload directory at `/usr/src/app/upload`, while this project uses Immich's current `/data` mount.
 
-### Software Dependencies
+Immich v3 supports direct upgrades from this deployment's former v2.7.5 pin. The database already uses VectorChord, as required by v3. Create and test a native PostgreSQL backup before the first v3 deployment.
 
-- Ansible 2.9+
-- Docker 20.10+
-- Docker Compose (for template processing)
+Before the first Compose start:
+
+1. Place the existing media tree under `/exports/docker/immich/upload`.
+2. Place automatic backups under `/exports/docker/immich/backups`.
+3. Place the PostgreSQL cluster under `/exports/docker/immich/database`.
+4. Create and test a native PostgreSQL backup.
+
+The play requires the existing PostgreSQL `PG_VERSION` file and all six Immich `.immich` media markers before deployment. These checks prevent a wrong path from becoming a fresh, empty installation.
+
+During migration, the deployment removes the four known legacy `immich_*` Swarm services. It does not prune unrelated services, stacks, or overlay networks.
 
 ## Configuration
 
-### 1. Ansible Vault Setup
-
-All sensitive variables are documented in [`vault.template.yml`](../../vault.template.yml) at the repo root. Copy it, populate the Immich section, and encrypt it:
-
-```bash
-cp ../../vault.template.yml vault.yml
-# fill in vault_immich_user and vault_immich_password
-ansible-vault encrypt vault.yml
-```
-
-### 2. Domain Configuration
-
-Set `vault.shared.general.domain` in your vault or inventory `all.vars`. See [`vault.template.yml`](../../vault.template.yml) for the expected key.
+Define these values in the encrypted vault:
 
 ```yaml
-general:
-   domain: "yourdomain.com"
+vault:
+  shared:
+    general:
+      domain: example.com
+
+  services:
+    immich:
+      database:
+        user: immich
+        password: replace-with-a-long-random-password
 ```
 
-### 3. Storage Planning
+The database username and password are written beneath `/opt/immich/secrets` and mounted as file-backed Compose secrets. They are not embedded in the retained Compose file or container environment.
 
-Ensure adequate NFS storage for:
+Changing either vault credential does not update roles inside an initialized PostgreSQL database. Rename the role or rotate its password inside PostgreSQL first, then update the vault and redeploy.
 
-- **Photos/Videos**: Primary storage requirement
-- **Database**: Metadata and user data (~1-5% of media size)
-- **ML Cache**: AI models and processing data (~2-10GB)
-- **Backups**: Database exports and configuration
+For an intentional new installation, add `--extra-vars immich_allow_fresh_install=true` to the first run only. Later runs should use the default data guards.
 
-## Deployment
+## Deploy
 
-### Quick Start
+Run from the repository root. Include `--extra-vars @vault.yml` when the vault is not already loaded by inventory:
 
 ```bash
-# Navigate to the immich deployment directory
-cd /home/joseph/projects/homelab-private/deployments/immich
-
-# Deploy the entire stack
-ansible-playbook -i ../../inventory.yml deploy.yml --ask-vault-pass
+ansible-playbook \
+  -i inventory.yml \
+  deployments/immich/deploy.yml \
+  -e target=odin \
+  --extra-vars @vault.yml \
+  --ask-vault-pass
 ```
 
-### Step-by-Step Deployment
+The role validates the project, pulls images, starts Compose without a second registry request, waits for health checks, and fails unless all four services are running.
 
-1. **Prepare Environment**
-   ```bash
-   # Verify Docker Swarm status
-   docker node ls
+Immediately before startup, the role stops and removes every container using Immich's fixed container names, including containers from an earlier run of this Compose project. Compose then runs with `recreate: always`, so every successful playbook run creates fresh containers. Bind-mounted application data remains untouched, anonymous volumes are retained, and unrelated containers are not pruned.
 
-   # Check NFS mount
-   ls -la /mnt/nfs/docker/
-   ```
+| Stage | Task file | Responsibility |
+| --- | --- | --- |
+| Validate | `validate.yml` | Guard existing data and database credentials. |
+| Filesystem | `filesystem.yml` | Create data and Compose directories and require local database storage. |
+| Prepare | `prepare.yml` | Prepare Docker, secrets, and the validated Compose project. |
+| Pull | `pull.yml` | Pull each project image sequentially. |
+| Deploy | `deploy.yml` | Replace, start, and verify the Immich containers. |
 
-2. **Run NFS Preparation**
-   ```bash
-   ansible-playbook -i ../../inventory.yml deploy.yml --tags check_nfs --ask-vault-pass
-   ```
-
-3. **Deploy Application**
-   ```bash
-   ansible-playbook -i ../../inventory.yml deploy.yml --tags deploy --ask-vault-pass
-   ```
-
-### Deployment Process
-
-The deployment automatically:
-
-1. Verifies prerequisites (Docker, docker-compose)
-2. Creates required NFS directories with proper permissions
-3. Stops existing services for clean deployment
-4. Processes configuration templates with vault variables
-5. Deploys services to Docker Swarm
-6. Cleans up temporary files
-
-## Post-Deployment
-
-### Service Verification
+## Operations
 
 ```bash
-# Check service status
-docker service ls | grep immich
-
-# View service logs
-docker service logs immich_immich-server
-docker service logs immich_immich-database
-docker service logs immich_immich-redis
-docker service logs immich_immich-machine-learning
+sudo docker compose --project-directory /opt/immich ps
+sudo docker compose --project-directory /opt/immich logs -f
+sudo docker compose --project-directory /opt/immich restart immich-server
+sudo docker compose --project-directory /opt/immich config --quiet
 ```
 
-### Initial Setup
+After migration, verify login, library counts, a new mobile upload, thumbnail generation, smart search, and creation of a new database backup.
 
-1. **Access Web Interface**
-   - Navigate to `https://immich.yourdomain.com`
-   - Create the first admin account
-   - Configure basic settings
+Redeploy after changing variables or templates by rerunning Ansible. Do not edit `/opt/immich/compose.yaml` directly because Ansible replaces it.
 
-2. **Mobile App Setup**
-   - Download Immich mobile app
-   - Configure server URL: `https://immich.yourdomain.com`
-   - Login with admin credentials
-   - Enable automatic backup
+## Backups
 
-3. **AI Features Configuration**
-   - Navigate to Administration → Machine Learning
-   - Enable face detection and object recognition
-   - Configure processing settings based on hardware
+Back up the complete data root, but treat `/exports/docker/immich/upload`, `/exports/docker/immich/backups`, and `/exports/docker/immich/database` as critical. A filesystem copy of a running PostgreSQL directory is not a substitute for a verified native database backup.
 
-### Health Checks
-
-The deployment includes comprehensive health monitoring:
-
-- **Database**: `pg_isready` checks with 30s intervals
-- **Redis**: `redis-cli ping` verification
-- **Server**: Built-in application health endpoints
-- **ML Service**: TensorFlow model availability checks
-
-## Security Considerations
-
-### Network Security
-
-- All external traffic routed through Traefik with HTTPS
-- Internal services communicate on encrypted overlay network
-- Database and Redis not exposed externally
-- Automatic SSL certificate management
-
-### Data Protection
-
-- Database credentials encrypted in Ansible vault
-- Sensitive environment variables not logged
-- File permissions follow least-privilege principle
-- Regular backup procedures documented
-
-## File Structure
-
-```
-immich/
-├── README.md                          # This comprehensive guide
-├── deploy.yml                         # Main deployment playbook
-├── group_vars/
-│   ├── all.yml                        # Non-sensitive variables
-│   └── vault.yml                      # Encrypted sensitive data (not in repo)
-├── roles/
-│   ├── check_nfs/
-│   │   └── tasks/
-│   │       └── main.yml               # NFS directory preparation
-│   └── deploy/
-│       └── tasks/
-│           └── main.yml               # Service deployment logic
-└── templates/
-    └── docker-compose.yaml            # Service definitions template
-```
-
-### Key Files
-
-- **`deploy.yml`**: Main entry point for deployment
-- **`group_vars/all.yml`**: Configuration variables and vault references
-- **`templates/docker-compose.yaml`**: Complete service definitions with Traefik integration
-- **`roles/check_nfs/`**: Ensures proper NFS directory structure
-- **`roles/deploy/`**: Handles service lifecycle and deployment
-
-## Support and Resources
-
-### Official Documentation
-
-- [Immich Documentation](https://immich.app/docs)
-- [Docker Swarm Guide](https://docs.docker.com/engine/swarm/)
-- [Traefik Documentation](https://doc.traefik.io/traefik/)
-
-### Community Resources
-
-- [Immich GitHub Repository](https://github.com/immich-app/immich)
-- [Docker Community Forums](https://forums.docker.com/)
-- [Ansible Documentation](https://docs.ansible.com/)
-
-### Getting Help
-
-1. Check service logs for specific error messages
-2. Verify all prerequisites are met
-3. Review troubleshooting section above
-4. Consult official Immich documentation
-5. Search GitHub issues for similar problems
-
-
-
-
+See the [Immich documentation](https://immich.app/docs) for application backup and restore procedures.

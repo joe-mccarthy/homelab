@@ -1,0 +1,165 @@
+#!/bin/bash
+# This file is rendered by Ansible to /usr/local/sbin/nfs-backup-job.
+# Do not edit the installed copy: the next deployment will replace it.
+#
+# It is both:
+# - the command invoked by each systemd service instance; and
+# - a safe wrapper for manual Restic commands documented in README.md.
+
+# Fail on an error, an unset variable, or a failed command in a pipeline. These
+# strict settings prevent a partially constructed Docker command from running.
+set -Eeuo pipefail
+
+# Values below are shell-quoted by Ansible's `quote` filter. They are immutable
+# for the lifetime of this invocation so a later command cannot alter them.
+readonly IMAGE={{ ('mazzolino/restic:' ~ nfs_backup.version) | quote }}
+readonly SOURCE_PATH={{ nfs_backup.source_path | quote }}
+readonly RESTORE_PATH={{ nfs_backup.restore_path | quote }}
+readonly CACHE_PATH={{ nfs_backup.cache_path | quote }}
+readonly CONFIG_PATH={{ nfs_backup.config_path | quote }}
+readonly RETRY_LOCK={{ nfs_backup.retry_lock | quote }}
+
+# The first argument selects a predefined job. `restic` is an escape hatch that
+# passes all remaining arguments directly to the Restic CLI inside a container.
+job="${1:-}"
+if [[ -z "$job" ]]; then
+  echo "Usage: $0 {backup|prune|check|restic <arguments...>}" >&2
+  exit 2
+fi
+shift
+
+# Deployment verification runs while Ansible holds the host lock continuously.
+# Every normal invocation acquires that lock and then honors the maintenance
+# marker before contacting the repository.
+if [[ "${NFS_BACKUP_MAINTENANCE:-0}" != 1 ]]; then
+  exec 9>/run/lock/nfs-backup.lock
+  flock 9
+
+  if [[ -e /run/nfs-backup-maintenance ]]; then
+    echo "Backup maintenance is in progress; retry after deployment completes." >&2
+    exit 75
+  fi
+fi
+
+# Arguments common to every temporary container.
+docker_args=(
+  run
+  # Delete the container automatically after its command exits. Images and the
+  # explicitly mounted cache remain available for the next invocation.
+  --rm
+  # Use a predictable name so active backup, maintenance, and manual jobs are
+  # immediately identifiable in Docker commands and logs.
+  --name "nfs-backup-$job"
+  # Keep snapshot grouping stable across randomly named containers.
+  --hostname nfs-backup
+  # Prevent processes inside the container from gaining additional privileges.
+  --security-opt no-new-privileges:true
+  # Load backend, cache, compression, credential, and timezone settings.
+  --env-file "$CONFIG_PATH/restic.env"
+  # Repository location and password are mounted as read-only files rather than
+  # exposed as command-line arguments.
+  --mount "type=bind,src=$CONFIG_PATH/repository,dst=/run/secrets/restic-repository,readonly"
+  --mount "type=bind,src=$CONFIG_PATH/password,dst=/run/secrets/restic-password,readonly"
+  # Preserve downloaded metadata indexes to reduce repeated S3 reads.
+  --mount "type=bind,src=$CACHE_PATH,dst=/root/.cache/restic"
+  # Labels make an active job discoverable with `docker ps --filter label=...`.
+  --label "homelab.job=nfs-backup-$job"
+)
+
+case "$job" in
+  backup)
+    # Repository creation is deliberately disabled. Operators must initialize a
+    # new repository explicitly so a misspelled S3 path cannot look successful.
+    docker_args+=(
+      --env SKIP_INIT=true
+      # Always expose the source read-only at the historical in-container path.
+      --mount "type=bind,src=$SOURCE_PATH,dst=/exports/docker,readonly"
+    )
+    restic_args=(
+      backup /exports/docker
+      # A fixed host and tag make snapshots easy to filter and retain safely.
+      --host nfs-backup
+      --tag nfs-backup
+      --verbose
+    )
+    ;;
+  prune)
+    # `forget --prune` first applies the policy, then removes now-unreferenced
+    # data only when at least one snapshot expired. All three filters are
+    # intentional: this policy must not affect another backup set in a shared
+    # repository merely because it uses the same generic hostname.
+    docker_args+=(--env SKIP_INIT=true)
+    restic_args=(
+      forget
+      --host nfs-backup
+      --path /exports/docker
+      --tag nfs-backup
+      --keep-within {{ nfs_backup.retention.keep_within | quote }}
+      --keep-daily {{ nfs_backup.retention.keep_daily }}
+      --keep-weekly {{ nfs_backup.retention.keep_weekly }}
+      --keep-monthly {{ nfs_backup.retention.keep_monthly }}
+      --keep-yearly {{ nfs_backup.retention.keep_yearly }}
+      --group-by "host,paths"
+      --prune
+      --verbose
+    )
+    ;;
+  check)
+    # `check` always validates repository structure. read-data-subset also
+    # downloads and verifies the configured random percentage of data packs.
+    docker_args+=(--env SKIP_INIT=true)
+    restic_args=(check --read-data-subset={{ nfs_backup.check_read_data_subset | quote }})
+    ;;
+  verify)
+    # Deployment-only smoke test. A valid response proves the image can open the
+    # repository and that the expected backup history is present.
+    docker_args+=(--env SKIP_INIT=true)
+    restic_args=(
+      snapshots
+      --host nfs-backup
+      --path /exports/docker
+      --tag nfs-backup
+      --latest 1
+      --compact
+    )
+    ;;
+  restic)
+    # Manual mode supports commands such as snapshots, init, restore, unlock,
+    # stats, and check without duplicating credentials on the command line.
+    # Resticker expects the subcommand first; global flags remain valid after
+    # it. Enforcing that order also lets this wrapper add --retry-lock safely.
+    if [[ $# -eq 0 ]]; then
+      echo "Usage: $0 restic <arguments...>" >&2
+      exit 2
+    fi
+    if [[ "$1" == -* ]]; then
+      echo "Put the Restic subcommand before its options: $0 restic <command> [options...]" >&2
+      exit 2
+    fi
+    docker_args+=(
+      --env SKIP_INIT=true
+      # Manual restore commands may write only beneath this host directory.
+      --mount "type=bind,src=$RESTORE_PATH,dst=/restore"
+    )
+    restic_args=("$@")
+    ;;
+  *)
+    # Reject typos rather than starting a container with unintended arguments.
+    echo "Unknown job: $job" >&2
+    exit 2
+    ;;
+esac
+
+# Resticker inspects its first argument to detect the selected Restic command.
+# Keep that command first, insert the global lock-retry option second, then
+# append all command-specific arguments. This also preserves Resticker's
+# special unlock handling.
+restic_args=(
+  "${restic_args[0]}"
+  --retry-lock "$RETRY_LOCK"
+  "${restic_args[@]:1}"
+)
+
+# docker remains attached, forwards Restic's exit status to systemd, and streams
+# stdout/stderr into the journal. The process exits when the one-shot job ends.
+exec docker "${docker_args[@]}" "$IMAGE" "${restic_args[@]}"

@@ -1,330 +1,211 @@
-# 🏡 Home Assistant Deployment
+# Home Assistant Deployment
 
-[![Ansible](https://img.shields.io/badge/Ansible-Automation-EE0000?logo=ansible&logoColor=white&style=flat-square)](https://docs.ansible.com/) [![Docker Swarm](https://img.shields.io/badge/Docker%20Swarm-Orchestration-2496ED?logo=docker&logoColor=white&style=flat-square)](https://docs.docker.com/engine/swarm/) [![Traefik](https://img.shields.io/badge/Traefik-HTTPS%20Access-24A1C1?logo=traefikproxy&logoColor=white&style=flat-square)](https://doc.traefik.io/traefik/) [![MQTT](https://img.shields.io/badge/MQTT-IoT%20Messaging-660066?logo=eclipsemosquitto&logoColor=white&style=flat-square)](https://mqtt.org/) [![Zigbee](https://img.shields.io/badge/Zigbee-Device%20Network-EB0443?style=flat-square)](https://csa-iot.org/all-solutions/zigbee/) [![Matter](https://img.shields.io/badge/Matter-Wi--Fi%20Devices-00BFB3?style=flat-square)](https://csa-iot.org/all-solutions/matter/) ![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2026.7.2-5C5C5C?style=flat-square) ![Zigbee2MQTT](https://img.shields.io/badge/Zigbee2MQTT-v2.12.1-5C5C5C?style=flat-square) ![Matter Server](https://img.shields.io/badge/Matter%20Server-1.4.0-5C5C5C?style=flat-square) ![Mosquitto](https://img.shields.io/badge/Mosquitto-2.1.2--alpine-5C5C5C?style=flat-square)
+[![Ansible](https://img.shields.io/badge/Ansible-Automation-EE0000?logo=ansible&logoColor=white&style=flat-square)](https://docs.ansible.com/) [![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white&style=flat-square)](https://docs.docker.com/compose/) [![Traefik](https://img.shields.io/badge/Traefik-HTTPS-24A1C1?logo=traefikproxy&logoColor=white&style=flat-square)](https://doc.traefik.io/traefik/) [![Matter](https://img.shields.io/badge/Matter-Wi--Fi-00BFB3?style=flat-square)](https://csa-iot.org/all-solutions/matter/)
 
-An Ansible deployment for a Docker Swarm based smart home stack: [Home Assistant](https://www.home-assistant.io/), [Matter.js Server](https://github.com/matter-js/matterjs-server), [Zigbee2MQTT](https://www.zigbee2mqtt.io/), and [Mosquitto](https://mosquitto.org/), routed through Traefik and backed by shared NFS storage.
-
-This deployment is built for a small home lab cluster where Home Assistant should survive node maintenance, keep its configuration on persistent storage, and integrate cleanly with Zigbee devices through MQTT and Wi-Fi Matter devices through a local Matter controller.
+An Ansible-managed, single-host Docker Compose deployment of Home Assistant, Matter.js Server, Zigbee2MQTT, and Mosquitto.
 
 > [!WARNING]
-> This stack is designed for a home lab. The bundled Mosquitto service currently runs with the upstream no-auth configuration, and Matter Server listens directly on the Matter node's LAN port `5580`, so review MQTT and LAN exposure before using it anywhere sensitive.
+> Mosquitto uses its upstream no-auth configuration and Matter Server listens on the host's LAN port `5580`. Keep both services on a trusted network.
 
----
-
-## ✨ What It Deploys
+## Services
 
 | Service | Image | Purpose |
 | --- | --- | --- |
-| `homeassistant` | `ghcr.io/home-assistant/home-assistant:2026.7.2` | Main automation platform and web UI. |
-| `matter-server` | `ghcr.io/matter-js/matterjs-server:1.4.0` | Matter controller WebSocket server for Wi-Fi Matter devices. |
-| `zigbee2mqtt` | `ghcr.io/koenkk/zigbee2mqtt:2.12.1` | Bridges Zigbee devices into MQTT topics Home Assistant can discover. |
-| `mqtt` | `eclipse-mosquitto:2.1.2-alpine` | MQTT broker used by Zigbee2MQTT and Home Assistant. |
+| `homeassistant` | `ghcr.io/home-assistant/home-assistant:2026.8.3` | Home automation platform and web UI. |
+| `matter-server` | `ghcr.io/matter-js/matterjs-server:1.4.0` | Matter controller and WebSocket API. |
+| `zigbee2mqtt` | `ghcr.io/koenkk/zigbee2mqtt:2.13.0` | Zigbee-to-MQTT bridge and web UI. |
+| `mqtt` | `eclipse-mosquitto:2.1.2-alpine` | MQTT broker used by Home Assistant and Zigbee2MQTT. |
 
-The stack name is `home_assistant`, so Swarm service names become:
+Docker Compose runs the project as `home_assistant` and assigns stable container names matching the service names above.
 
-- `home_assistant_homeassistant`
-- `home_assistant_matter-server`
-- `home_assistant_zigbee2mqtt`
-- `home_assistant_mqtt`
+## Runtime Model
 
----
+All four containers run on the host passed through `-e target=...`. The deployment uses ordinary Docker Compose without node labels or placement constraints. Its private project network is local; the external proxy network can be a bridge on a Compose-only host or an attachable overlay on a Swarm host.
 
-## 🧱 Architecture
+Home Assistant, Zigbee2MQTT, and Mosquitto share the Compose project network. Home Assistant and Zigbee2MQTT also join the external `proxy` network so the local Traefik container can route HTTPS traffic to them.
 
-```text
-Zigbee devices
-     │
-     ▼
-Zigbee coordinator ── Zigbee2MQTT ── Mosquitto MQTT ── Home Assistant
-                                             │
-                                             ▼
-                                    Traefik HTTPS routing
-
-Matter Wi-Fi devices ── Matter Server host network
-                                  ▲
-                                  │
-Home Assistant ── trusted LAN ────┘
-```
-
-Traefik exposes:
-
-- `https://homeassistant.<your-domain>`
-- `https://zigbee2mqtt.<your-domain>`
-
-Matter Server is not exposed through Traefik. Home Assistant should connect directly to the dedicated Matter node's trusted LAN address:
+Matter Server uses `network_mode: host` because Matter device discovery and control require LAN IPv6 and mDNS multicast. Home Assistant connects to it through the host's stable LAN address:
 
 ```text
-ws://<matter-node-lan-ip>:5580/ws
+ws://<home-assistant-host>:5580/ws
 ```
 
-The domain comes from `vault.shared.general.domain`, which is shared across the deployment catalog.
-
----
-
-## 📁 Files
+## Files
 
 | Path | Purpose |
 | --- | --- |
-| [`deploy.yml`](deploy.yml) | Main playbook. Targets the `manager` group and deploys from one selected manager. |
-| [`group_vars/all.yml`](group_vars/all.yml) | Home Assistant variables, vault lookups, and pinned image versions. |
-| [`templates/docker-compose.yaml`](templates/docker-compose.yaml) | Docker Swarm stack template. |
-| [`templates/configuration.yaml`](templates/configuration.yaml) | Initial Home Assistant configuration template. |
-| [`templates/zigbee/configuration.yaml`](templates/zigbee/configuration.yaml) | Initial Zigbee2MQTT configuration template. |
-| [`roles/check_nfs/tasks/main.yml`](roles/check_nfs/tasks/main.yml) | Creates persistent directories and first-run config files. |
-| [`roles/deploy_home_assistant/tasks/main.yml`](roles/deploy_home_assistant/tasks/main.yml) | Stops old services, renders the compose template, and deploys the stack. |
+| [`deploy.yml`](deploy.yml) | Targets the single application host and runs the Home Assistant role. |
+| [`group_vars/all.yml`](group_vars/all.yml) | Local paths, network name, vault lookups, and image versions. |
+| [`templates/docker-compose.yaml`](templates/docker-compose.yaml) | Local Docker Compose project template. |
+| [`templates/configuration.yaml`](templates/configuration.yaml) | Initial Home Assistant configuration. |
+| [`templates/zigbee/configuration.yaml`](templates/zigbee/configuration.yaml) | Initial Zigbee2MQTT configuration. |
+| [`roles/home_assistant/tasks/main.yml`](roles/home_assistant/tasks/main.yml) | Runs the five deployment stages in order. |
 
----
+The rendered Compose project remains at `/opt/home-assistant/compose.yaml` so normal `docker compose` commands can manage it after deployment.
 
-## ✅ Prerequisites
+## Prerequisites
 
-- A working Docker Swarm created by [`docker-swarm/create.yml`](../../docker-swarm/create.yml).
-- At least one Swarm node labelled `storage=true`.
-- Exactly one trusted-LAN Swarm node labelled both `storage=true` and `matter=true`.
-- The external `proxy` overlay network created by the core/Traefik deployment.
-- Traefik already deployed and able to route wildcard service domains.
-- NFS mounted and available on the deployment host.
-- A Zigbee coordinator connected to the node that will run Zigbee2MQTT.
-- IPv6 and mDNS/multicast working between the Matter node, the phone used for commissioning, and Wi-Fi Matter devices.
-- A stable LAN IP or LAN DNS record for the Matter node.
-- Vault values defined in [`../../vault.template.yml`](../../vault.template.yml).
+- A reachable inventory hostname, DNS name, or IP address passed as `target`.
+- Docker Engine and the Docker Compose v2 plugin on that host.
+- The `community.docker` Ansible collection from [`requirements.yml`](../../requirements.yml).
+- `/exports/docker` available as local persistent storage, or `home_assistant.data_dir` changed to another local path.
+- A local Traefik deployment attached to the external `proxy` network.
+- A Zigbee coordinator available through a local `/dev/...` path or a `tcp://...` endpoint.
+- Working IPv6 and mDNS/multicast between this host and Matter devices.
+- Vault values defined from [`../../vault.template.yml`](../../vault.template.yml).
 
-The compose template places services that use persistent data on nodes with:
+The machine bootstrap creates the external `proxy` bridge on a Compose-only host or an attachable overlay on a Swarm host; this deployment does not manage it.
 
-```yaml
-node.labels.storage == true
-```
-
-Matter Server also requires the dedicated placement label:
-
-```yaml
-node.labels.matter == true
-```
-
-Persist `matter: "true"` under that node's `swarm_labels` in `inventory.yml`. For an existing Swarm, apply it once from a manager before deploying:
-
-```bash
-docker node update --label-add matter=true <matter-node>
-```
-
----
-
-## 🚀 Quick Start
+## Deploy
 
 Run from the repository root:
 
 ```bash
-ansible-playbook -i inventory.yml deployments/home-assistant/deploy.yml --ask-vault-pass
+ansible-playbook -i inventory.yml deployments/home-assistant/deploy.yml \
+  -e target=odin --extra-vars @vault.yml --ask-vault-pass
 ```
 
-If your Ansible user requires a sudo password, add:
+Add `--ask-become-pass` if the remote user requires a sudo password.
 
-```bash
---ask-become-pass
-```
+The deployment uses one Home Assistant role with five ordered task files:
 
-After deployment, check the Swarm services:
+| Stage | Task file | Responsibility |
+| --- | --- | --- |
+| Validate | [`validate.yml`](roles/home_assistant/tasks/validate.yml) | Validates required settings and existing managed directory paths without modifying the host. |
+| Filesystem | [`filesystem.yml`](roles/home_assistant/tasks/filesystem.yml) | Creates persistent data, initial configuration, and Compose directories. |
+| Prepare | [`prepare.yml`](roles/home_assistant/tasks/prepare.yml) | Ensures Docker is running, renders and validates Compose, and verifies persisted Zigbee settings. |
+| Pull | [`pull.yml`](roles/home_assistant/tasks/pull.yml) | Pulls all project images before the existing containers are interrupted. |
+| Deploy | [`deploy.yml`](roles/home_assistant/tasks/deploy.yml) | Removes known containers, reapplies Matter ownership, starts Compose, and verifies every service. |
 
-```bash
-docker service ls
-docker service ps home_assistant_homeassistant
-docker service ps home_assistant_matter-server
-docker service ps home_assistant_zigbee2mqtt
-docker service ps home_assistant_mqtt
-```
+[`roles/home_assistant/tasks/main.yml`](roles/home_assistant/tasks/main.yml) imports these files in deployment order. The top-level playbook includes only the `home_assistant` role.
 
-Follow logs while the stack starts:
+The deployment:
 
-```bash
-docker service logs -f home_assistant_homeassistant
-docker service logs -f home_assistant_matter-server
-docker service logs -f home_assistant_zigbee2mqtt
-docker service logs -f home_assistant_mqtt
-```
+1. Prepares persistent data under `home_assistant.data_dir`.
+2. Installs the Docker Compose plugin and starts Docker.
+3. Renders and validates `/opt/home-assistant/compose.yaml` with mode `0600`.
+4. Verifies a configured local Zigbee device, when applicable, and confirms that persisted MQTT and coordinator settings match the vault.
+5. Pulls every required image while the existing deployment is still running.
+6. Stops and removes containers using the deployment's fixed names while retaining volumes.
+7. Reapplies Matter Server data ownership after its container has stopped.
+8. Runs `docker compose up` with forced recreation and waits for all four containers without another registry request.
+9. Fails unless every expected service is running.
 
----
+Only the known Home Assistant Swarm services and the five container names `homeassistant`, `zigbee2mqtt`, `matter-server`, `mqtt`, and the obsolete `matter-server-proxy` are removed. The role does not broadly prune unrelated services or containers.
 
-## 🔐 Vault Variables
+## Configuration
 
-This deployment reads its sensitive and environment-specific values from the root vault structure:
+The deployment reads these vault-backed values:
 
 ```yaml
 vault:
   shared:
     general:
-      domain: "example.com"
+      domain: example.com
 
   services:
     home_assistant:
-      proxy: "172.18.0.0/16"
-      mqtt_server: "mqtt://mqtt:1883"
-      zigbee_serial_port: "/dev/ttyUSB0"
+      proxy: 172.18.0.0/16
+      mqtt_server: mqtt://mqtt:1883
+      zigbee_serial_port: tcp://zigbee-coordinator.local:6638
 ```
 
-| Variable | Used For |
+| Variable | Used for |
 | --- | --- |
-| `vault.shared.general.domain` | Builds Traefik hostnames for Home Assistant and Zigbee2MQTT. |
-| `vault.services.home_assistant.proxy` | Populates Home Assistant `trusted_proxies`. |
-| `vault.services.home_assistant.mqtt_server` | Sets the MQTT broker URL in Zigbee2MQTT. |
-| `vault.services.home_assistant.zigbee_serial_port` | Sets the Zigbee coordinator serial port in Zigbee2MQTT. |
+| `vault.shared.general.domain` | Traefik host rules for Home Assistant and Zigbee2MQTT. |
+| `vault.services.home_assistant.proxy` | Home Assistant's trusted proxy address or CIDR. |
+| `vault.services.home_assistant.mqtt_server` | Zigbee2MQTT broker URL; normally `mqtt://mqtt:1883`. |
+| `vault.services.home_assistant.zigbee_serial_port` | Local device path or TCP coordinator URL used by Zigbee2MQTT. |
 
-For the bundled Mosquitto service, `mqtt://mqtt:1883` is the expected internal broker URL. Use a different value only if Zigbee2MQTT should connect to an external broker.
+The Home Assistant and Zigbee2MQTT configuration templates are initial defaults and are not overwritten after first creation. Edit `/exports/docker/home_assistant/configuration.yaml` directly if `trusted_proxies` needs the local bridge CIDR. If the MQTT URL or coordinator path changes, edit `/exports/docker/home_assistant/zigbee2mqtt/data/configuration.yaml` as well as updating the vault.
 
----
+## Persistent Data
 
-## 💾 Storage
-
-The NFS role prepares:
+The default data root is `/exports/docker/home_assistant`:
 
 ```text
-/mnt/nfs/docker/home_assistant
-/mnt/nfs/docker/home_assistant/matter-server/data
-/mnt/nfs/docker/home_assistant/mosquitto
-/mnt/nfs/docker/home_assistant/zigbee2mqtt
-/mnt/nfs/docker/home_assistant/zigbee2mqtt/data
+/exports/docker/home_assistant
+├── configuration.yaml
+├── automations.yaml
+├── scenes.yaml
+├── scripts.yaml
+├── matter-server/data
+├── mosquitto
+└── zigbee2mqtt/data
 ```
 
-The Swarm stack mounts the storage export paths into containers:
+The initial Home Assistant and Zigbee2MQTT templates use `force: false`, so subsequent deployments preserve files changed by the applications or by hand.
+
+Matter.js Server runs as UID/GID `1000`. The deployment recursively applies that ownership to `matter-server/data`, including data migrated from Python Matter Server.
+
+## Operations
+
+Check all containers:
+
+```bash
+sudo docker compose --project-directory /opt/home-assistant ps
+```
+
+Follow logs:
+
+```bash
+sudo docker compose --project-directory /opt/home-assistant logs -f
+```
+
+Restart one service:
+
+```bash
+sudo docker compose --project-directory /opt/home-assistant restart homeassistant
+sudo docker compose --project-directory /opt/home-assistant restart matter-server
+sudo docker compose --project-directory /opt/home-assistant restart zigbee2mqtt
+sudo docker compose --project-directory /opt/home-assistant restart mqtt
+```
+
+Redeploy after changing variables or templates by rerunning the Ansible playbook. Every run removes the known containers and recreates all four services; persistent bind-mounted data remains intact. Do not edit the rendered Compose file because Ansible replaces it.
+
+## Zigbee
+
+For a local coordinator, use a stable `/dev/serial/by-id/...` path instead of `/dev/ttyUSB0`; Compose passes `/dev/...` values through as Docker devices. For a network coordinator, use its `tcp://host:port` URL. TCP coordinators are configured only in Zigbee2MQTT and are not added to Compose's `devices` list.
+
+Pairing is disabled by default in the initial configuration. Enable it only while adding devices, then disable it again.
+
+## Matter
+
+Add the Matter integration in Home Assistant under **Settings > Devices & services**. Choose the custom Matter Server option and enter:
 
 ```text
-/exports/docker/home_assistant                -> /config
-/exports/docker/home_assistant/matter-server/data -> /data
-/exports/docker/home_assistant/zigbee2mqtt/data -> /app/data
-/exports/docker/home_assistant/mosquitto      -> /mosquitto
+ws://<home-assistant-host>:5580/ws
 ```
 
-Matter.js Server runs as UID/GID `1000`. Deployment applies that ownership recursively to `matter-server/data` after stopping the old service, including existing Python Matter Server data that the replacement server migrates on first start.
+Use the host's stable LAN IP or LAN DNS name, not a Compose service name. Matter Server is intentionally outside the project networks and is not routed through Traefik.
 
-The role also creates these Home Assistant files if they do not already exist:
+This setup supports Wi-Fi Matter devices. Thread devices additionally require a working Thread border router and routable IPv6 connectivity.
 
-- `configuration.yaml`
-- `automations.yaml`
-- `scenes.yaml`
-- `scripts.yaml`
+## Troubleshooting
 
-The Home Assistant and Zigbee2MQTT configuration templates use `force: false`, so existing configuration files are preserved on later runs.
-
----
-
-## 🔌 Zigbee Notes
-
-The Zigbee coordinator path must be valid on the node that runs the service. Prefer a stable `/dev/serial/by-id/...` path when possible, because `/dev/ttyUSB0` can change after reboot or when USB devices are reordered.
-
-The compose template currently maps `/dev/ttyUSB0` into the Home Assistant container and the Zigbee2MQTT template uses `vault.services.home_assistant.zigbee_serial_port`. If you use a different device path, update the vault value and make sure the stack template maps the same hardware path.
-
-Pairing is disabled by default:
-
-```yaml
-permit_join: false
-```
-
-Enable pairing only while adding devices, then turn it off again.
-
----
-
-## 🧩 Matter Notes
-
-Matter.js Server runs on Docker's predefined `host` network because Matter over Wi-Fi depends on local IPv6 and mDNS multicast. It is pinned to the one node carrying both the `storage=true` and `matter=true` labels, giving its host-networked endpoint a predictable LAN address.
-
-The archived Python Matter Server ended at version `8.1.2`. Matter.js Server is its maintained, WebSocket-compatible successor and migrates an existing data directory on first start.
-
-> [!NOTE]
-> Home Assistant recommends Home Assistant OS with the official Matter Server app as the supported Matter installation type. This stack uses the documented self-managed Docker container path for a Swarm-based home lab.
-
-After deployment, add the Matter integration in Home Assistant under **Settings > Devices & services**. When asked for the Matter Server connection, use:
-
-```text
-ws://<matter-node-lan-ip>:5580/ws
-```
-
-Use the node's stable LAN IP or a LAN DNS name that resolves to that IP. Do not use a Swarm service name: a host-networked service is intentionally not attached to the overlay network.
-
-For Wi-Fi Matter device commissioning, use the Home Assistant Companion app on a phone with Bluetooth enabled and connected to the same Wi-Fi/LAN where the Matter device will run. Many Wi-Fi Matter devices require 2.4 GHz Wi-Fi during onboarding.
-
-This deployment supports Wi-Fi Matter devices. Thread Matter devices still need a Thread border router and additional Thread network planning.
-
----
-
-## 🛠️ Operations
-
-### Redeploy the Stack
-
-```bash
-ansible-playbook -i inventory.yml deployments/home-assistant/deploy.yml --ask-vault-pass
-```
-
-The deployment role removes the existing Home Assistant services before redeploying the stack, so expect a short interruption.
-
-### Restart a Service
-
-```bash
-docker service update --force home_assistant_homeassistant
-docker service update --force home_assistant_matter-server
-docker service update --force home_assistant_zigbee2mqtt
-docker service update --force home_assistant_mqtt
-```
-
-### Inspect Rendered Services
-
-```bash
-docker service inspect home_assistant_homeassistant
-docker service inspect home_assistant_matter-server
-docker service inspect home_assistant_zigbee2mqtt
-docker service inspect home_assistant_mqtt
-```
-
-### Check Persistent Data
-
-```bash
-ls -la /mnt/nfs/docker/home_assistant
-ls -la /mnt/nfs/docker/home_assistant/matter-server/data
-ls -la /mnt/nfs/docker/home_assistant/zigbee2mqtt/data
-```
-
----
-
-## 🧯 Troubleshooting
-
-| Symptom | What to Check |
+| Symptom | Check |
 | --- | --- |
-| Home Assistant returns proxy errors | Confirm `vault.services.home_assistant.proxy` matches the Traefik network CIDR or proxy IP. |
-| Home Assistant cannot connect to Matter | Confirm the integration uses `ws://<matter-node-lan-ip>:5580/ws`, port `5580` is reachable from the Home Assistant container, and `home_assistant_matter-server` is running. |
-| Matter devices fail commissioning | Confirm IPv6 is enabled, mDNS/multicast is not filtered, and the phone, Matter node, and Matter device are on the same LAN or VLAN. |
-| Zigbee2MQTT cannot reach MQTT | Confirm `vault.services.home_assistant.mqtt_server` is reachable from the stack, usually `mqtt://mqtt:1883`. |
-| Zigbee coordinator is missing | Check the device path on the storage-labelled node with `ls -la /dev/serial/by-id /dev/ttyUSB* /dev/ttyACM*`. |
-| Services stay pending | Confirm a storage node exists and exactly one eligible node has both `storage=true` and `matter=true`. |
-| Traefik routes do not work | Confirm the `proxy` network exists and DNS points `homeassistant.<domain>` and `zigbee2mqtt.<domain>` at Traefik. |
-| Config changes do not appear | Existing config files are preserved by design. Edit files under `/mnt/nfs/docker/home_assistant` directly or remove the file before rerunning the playbook. |
+| Only Matter Server starts | Inspect `proxy` with `docker network inspect proxy`; it must be a bridge on a Compose-only host or an attachable overlay on a Swarm host. |
+| Deployment reports a missing service | Run `sudo docker compose --project-directory /opt/home-assistant ps --all` and inspect the failed service's logs. |
+| Home Assistant proxy errors | Update `vault.services.home_assistant.proxy` for the local proxy bridge CIDR. |
+| Zigbee2MQTT cannot open the coordinator | For local hardware, verify the device path and ownership. For TCP hardware, verify the host and port are reachable. |
+| Zigbee2MQTT cannot reach MQTT | Use `mqtt://mqtt:1883` and confirm both services are on the project default network. |
+| Home Assistant cannot connect to Matter | Confirm port `5580` is reachable at the host LAN address and Matter Server is healthy. |
+| Matter commissioning fails | Check host IPv6, mDNS/multicast, firewall rules, and phone LAN connectivity. |
+| Traefik cannot route a service | Confirm Traefik is a local container on the same `proxy` network and its Docker provider is enabled. |
 
-Useful commands:
+## Security
 
-```bash
-docker service ps home_assistant_homeassistant --no-trunc
-docker service logs home_assistant_homeassistant
-docker service logs home_assistant_matter-server
-docker service logs home_assistant_zigbee2mqtt
-docker network inspect proxy
-docker network inspect host
-```
+- Keep `vault.services.home_assistant.proxy` limited to the actual reverse proxy network.
+- Do not expose Matter Server port `5580` to the internet.
+- Mosquitto currently has no authentication; keep it isolated or add authentication before publishing port `1883`.
+- Leave Zigbee pairing disabled outside onboarding windows.
+- Back up the entire data root, especially `.storage`, `matter-server/data`, and `zigbee2mqtt/data`.
 
----
+## Related Documentation
 
-## 🛡️ Security Notes
-
-- Keep `vault.services.home_assistant.proxy` narrow. Do not trust broad networks unless they are truly controlled.
-- The bundled Mosquitto service uses `mosquitto -c /mosquitto-no-auth.conf`; restrict network exposure or add authentication before exposing MQTT beyond the stack.
-- Do not expose Matter Server port `5580` to the internet. It should only be reachable on the trusted LAN.
-- Leave Zigbee pairing disabled except during device onboarding.
-- Enable strong Home Assistant authentication and MFA from the Home Assistant UI.
-- Back up `/mnt/nfs/docker/home_assistant`, especially `.storage/`, `matter-server/data`, and `zigbee2mqtt/data`.
-
----
-
-## 📚 Related Docs
-
-- [Root README](../../README.md)
 - [Deployments catalog](../README.md)
-- [Core deployments](../core-deployments/README.md)
 - [Traefik deployment](../traefik/README.md)
 - [Vault template](../../vault.template.yml)
 - [Home Assistant Matter integration](https://www.home-assistant.io/integrations/matter/)
-- [Matter.js Server Docker notes](https://github.com/matter-js/matterjs-server/blob/main/docs/docker.md)
+- [Matter.js Server Docker documentation](https://github.com/matter-js/matterjs-server/blob/main/docs/docker.md)

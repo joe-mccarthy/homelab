@@ -1,156 +1,95 @@
-version: '3.8'
-
+---
+# Traefik label keys and Jinja expressions are intentionally kept intact.
+# yamllint disable rule:line-length
 services:
   traefik:
+    container_name: traefik
     image: "traefik:{{ traefik.version }}"
-    # Specifies the Docker image for Traefik, pulled from Docker Hub.
-    # Version is pinned to a stable release for reproducible deployments.
-
+    restart: unless-stopped
     networks:
       - proxy
-      # Connects the Traefik service to the `proxy` network for communication with other services.
-
     secrets:
       - cf_token
-      # Docker secret containing the Cloudflare API token for DNS-based challenges.
       - cf_email
-      # Docker secret containing the Cloudflare account email for DNS-based challenges.
-
     command:
-      # Global settings
-      - "--global.checknewversion=false"
-      # Disables automatic version checks to avoid unnecessary network requests.
-      - "--global.sendanonymoususage=false"
-      # Disables sending anonymous usage data to Traefik.
+      - --global.checknewversion=false
+      - --global.sendanonymoususage=false
 
-      # API and dashboard
-      - "--api.insecure=false"
-      # Disables the unauthenticated dashboard/API listener on port 8080.
+      - --api.insecure=false
       - "--api.dashboard={{ (traefik.dashboard.enabled | bool) | ternary('true', 'false') }}"
-      # Exposes the dashboard only through the protected HTTPS router below.
-      - "--api.debug=false"
-      # Keeps API debug endpoints disabled.
+      - --api.debug=false
 
-      - "--log.level=DEBUG"
-      - "--log.filePath=/logs/traefik.log"
+      - --log.level=DEBUG
+      - --log.filepath=/logs/traefik.log
 
-      # Entry points
-      - "--entrypoints.web.address=:80"
-      # Configures the HTTP entry point on port 80.
-      - "--entrypoints.websecure.address=:443"
-      # Configures the HTTPS entry point on port 443.
-      - "--entrypoints.ssh.address=:2222"
-      # Configures the SSH entry point on port 2222 for forwarding SSH traffic to services.
-      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
-      # Redirects HTTP traffic to HTTPS.
-      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
-      # Ensures the redirection uses the HTTPS scheme.
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.ssh.address=:2222
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
 
-      # Docker provider
-      - "--providers.docker=true"
-      # Enables the Docker provider for dynamic configuration.
-      - "--providers.swarm.endpoint=unix:///var/run/docker.sock"
-      # Configures the Docker Swarm endpoint for Traefik.
-      - "--providers.docker.exposedByDefault=false"
-      # Ensures that only explicitly labeled services are exposed by Traefik.
-      - "--providers.docker.network=proxy"
-      # Specifies the Docker network that Traefik should use.
+      - --providers.docker=true
+      - --providers.docker.endpoint=unix:///var/run/docker.sock
+      - --providers.docker.exposedbydefault=false
+      - "--providers.docker.network={{ traefik.proxy_network }}"
+{% if (traefik_docker_info.stdout | from_json).Swarm.ControlAvailable %}
+      - --providers.swarm=true
+      - --providers.swarm.endpoint=unix:///var/run/docker.sock
+      - --providers.swarm.exposedbydefault=false
+      - "--providers.swarm.network={{ traefik.proxy_network }}"
+{% endif %}
 
-      # Let's Encrypt configuration
-      - "--certificatesresolvers.letsencrypt.acme.dnschallenge=true"
-      # Enables DNS-based challenges for Let's Encrypt certificates.
-      - "--certificatesresolvers.letsencrypt.acme.dnschallenge.provider=cloudflare"
-      # Configures Cloudflare as the DNS provider for the challenges.
-      - "--certificatesResolvers.letsencrypt.acme.dnschallenge.resolvers=1.1.1.1:53,1.0.0.1:53"
-      # Specifies the DNS resolvers to use for the challenges.
-      - "--certificatesResolvers.letsencrypt.acme.dnschallenge.delayBeforeCheck=20"
-      # Adds a delay before checking DNS propagation.
-
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge=true
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge.provider=cloudflare
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge.resolvers=1.1.1.1:53,1.0.0.1:53
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge.propagation.delaybeforechecks=20s
       - "--certificatesresolvers.letsencrypt.acme.email=admin@{{ vault.shared.general.domain }}"
-      # Specifies the email address for Let's Encrypt notifications.
-      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
-      # Specifies the file path for storing Let's Encrypt certificates and keys.
-      - "--certificatesresolvers.letsencrypt.acme.caserver=https://acme-v02.api.letsencrypt.org/directory"
-      # Specifies the Let's Encrypt production server. Use the staging server for testing.
+      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.letsencrypt.acme.caserver=https://acme-v02.api.letsencrypt.org/directory
 
-      # TLS configuration
-      - "--entrypoints.websecure.http.tls=true"
-      # Enables TLS for the `websecure` entry point.
-      - "--entrypoints.websecure.http.tls.certResolver=letsencrypt"
-      # Configures Let's Encrypt as the certificate resolver.
+      - --entrypoints.websecure.http.tls=true
+      - --entrypoints.websecure.http.tls.certresolver=letsencrypt
       - "--entrypoints.websecure.http.tls.domains[0].main={{ vault.shared.general.domain }}"
-      # Specifies the main domain for the certificate.
       - "--entrypoints.websecure.http.tls.domains[0].sans=*.{{ vault.shared.general.domain }}"
-      # Specifies the wildcard domain for the certificate.
-
-    deploy:
-      placement:
-        constraints: [node.role == manager]
-        # Ensures that the Traefik service is deployed only on manager nodes in the Swarm cluster.
-
-      labels:
-        - "traefik.enable={{ (traefik.dashboard.enabled | bool) | ternary('true', 'false') }}"
-        # Enables or disables the Traefik dashboard/API route from shared configuration.
-        - "traefik.http.routers.traefik.entrypoints=web"
-        # Configures the HTTP entry point for the Traefik router.
-        - "traefik.http.routers.traefik.rule=Host(`traefik.{{ vault.shared.general.domain }}`)"
-        # Specifies the routing rule for the Traefik dashboard.
-        - "traefik.http.middlewares.traefik-dashboard-allowlist.ipallowlist.sourcerange={{ traefik.dashboard.allowed_ips }}"
-        # Limits dashboard/API access to the configured trusted source ranges.
-        - "traefik.http.middlewares.traefik-https-redirect.redirectscheme.scheme=https"
-        # Redirects HTTP traffic to HTTPS.
-        - "traefik.http.routers.traefik.middlewares=traefik-dashboard-allowlist,traefik-https-redirect"
-        # Applies the allowlist and HTTPS redirection middleware to the Traefik router.
-        - "traefik.http.routers.traefik-secure.entrypoints=websecure"
-        # Configures the HTTPS entry point for the Traefik router.
-        - "traefik.http.routers.traefik-secure.rule=Host(`traefik.{{ vault.shared.general.domain }}`)"
-        # Specifies the routing rule for the secure Traefik dashboard.
-        - "traefik.http.routers.traefik-secure.tls=true"
-        # Enables TLS for the secure Traefik router.
-        - "traefik.http.routers.traefik-secure.tls.certresolver=letsencrypt"
-        # Configures Let's Encrypt as the certificate resolver for the secure router.
-        - "traefik.http.routers.traefik-secure.middlewares=traefik-dashboard-allowlist"
-        # Applies the trusted source range allowlist to HTTPS dashboard/API requests.
-        - "traefik.http.routers.traefik-secure.service=api@internal"
-        # Routes the protected dashboard/API host to Traefik's internal API service.
-        - "traefik.docker.network=proxy"
-        # Specifies the Docker network that Traefik should use.
-
+    labels:
+      traefik.enable: "{{ (traefik.dashboard.enabled | bool) | ternary('true', 'false') }}"
+      traefik.http.routers.traefik.entrypoints: web
+      traefik.http.routers.traefik.rule: >-
+        Host(`traefik.{{ vault.shared.general.domain }}`)
+      traefik.http.middlewares.traefik-dashboard-allowlist.ipallowlist.sourcerange: >-
+        {{ traefik.dashboard.allowed_ips }}
+      traefik.http.middlewares.traefik-https-redirect.redirectscheme.scheme: https
+      traefik.http.routers.traefik.middlewares: >-
+        traefik-dashboard-allowlist,traefik-https-redirect
+      traefik.http.routers.traefik-secure.entrypoints: websecure
+      traefik.http.routers.traefik-secure.rule: >-
+        Host(`traefik.{{ vault.shared.general.domain }}`)
+      traefik.http.routers.traefik-secure.tls: 'true'
+      traefik.http.routers.traefik-secure.tls.certresolver: letsencrypt
+      traefik.http.routers.traefik-secure.middlewares: >-
+        traefik-dashboard-allowlist
+      traefik.http.routers.traefik-secure.service: api@internal
+      traefik.docker.network: "{{ traefik.proxy_network }}"
     ports:
       - "{{ traefik.ports.web }}:80"
-      # Maps port 80 on the host to port 80 in the container for HTTP traffic.
       - "{{ traefik.ports.websecure }}:443"
-      # Maps port 443 on the host to port 443 in the container for HTTPS traffic.
       - "{{ traefik.ports.ssh }}:2222"
-      # Maps port 2222 on the host to port 2222 in the container for SSH traffic.
-
     environment:
-      - CF_API_EMAIL_FILE=/run/secrets/cf_email
-      # Specifies the path to the Docker secret containing the Cloudflare email.
-      - CF_DNS_API_TOKEN_FILE=/run/secrets/cf_token
-      # Specifies the path to the Docker secret containing the Cloudflare API token.
-
+      CF_API_EMAIL_FILE: /run/secrets/cf_email
+      CF_DNS_API_TOKEN_FILE: /run/secrets/cf_token
     volumes:
       - /etc/localtime:/etc/localtime:ro
-      # Mounts the host's local time configuration as read-only to synchronize the container's time with the host.
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      # Mounts the Docker socket as read-only to allow Traefik to interact with the Docker API.
-      - /mnt/nfs/docker/traefik:/letsencrypt
-      # Mounts the NFS directory for storing Let's Encrypt certificates and keys.
-      - /mnt/nfs/docker/traefik/logs:/logs/
+      - "{{ traefik.data_dir }}:/letsencrypt"
+      - "{{ traefik.data_dir }}/logs:/logs"
 
 networks:
   proxy:
     external: true
-    # Declares the `proxy` network as external, meaning it is managed outside this compose file.
-    # Ensure the `proxy` network is already created and managed by Traefik or another service.
+    name: "{{ traefik.proxy_network }}"
 
 secrets:
   cf_token:
-    external: true
-    # Declares the `cf_token` secret as external, meaning it is managed outside this compose file.
-    # Ensure the secret is created and available in the Docker Swarm cluster before deploying this stack.
+    file: ./secrets/cf_token
   cf_email:
-    external: true
-    # Declares the `cf_email` secret as external, meaning it is managed outside this compose file.
-    # Ensure the secret is created and available in the Docker Swarm cluster before deploying this stack.
+    file: ./secrets/cf_email

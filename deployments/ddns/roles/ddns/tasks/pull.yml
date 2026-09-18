@@ -1,0 +1,6 @@
+---
+- name: Pull DDNS image
+  community.docker.docker_compose_v2_pull:
+    project_src: "{{ ddns.compose_dir }}"
+    project_name: ddns
+    policy: always

@@ -1,0 +1,15 @@
+---
+- name: Run Home Assistant validation stage
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Run Home Assistant filesystem stage
+  ansible.builtin.import_tasks: filesystem.yml
+
+- name: Run Home Assistant preparation stage
+  ansible.builtin.import_tasks: prepare.yml
+
+- name: Run Home Assistant image pull stage
+  ansible.builtin.import_tasks: pull.yml
+
+- name: Run Home Assistant deployment stage
+  ansible.builtin.import_tasks: deploy.yml

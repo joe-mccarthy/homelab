@@ -1,0 +1,38 @@
+---
+- name: Remove the legacy DDNS Swarm service before deployment
+  ansible.builtin.include_role:
+    name: remove_legacy_swarm_services
+  vars:
+    remove_legacy_swarm_services_list:
+      - ddns_cloudflare-ddns
+
+- name: Remove the existing DDNS container before deployment
+  community.docker.docker_container:
+    name: cloudflare-ddns
+    state: absent
+    keep_volumes: true
+    stop_timeout: 30
+
+- name: Create and start DDNS container
+  community.docker.docker_compose_v2:
+    project_src: "{{ ddns.compose_dir }}"
+    project_name: ddns
+    state: present
+    pull: never
+    recreate: always
+    remove_orphans: true
+    wait: true
+    wait_timeout: 60
+  register: ddns_compose
+
+- name: Verify DDNS is running
+  ansible.builtin.assert:
+    that:
+      - >-
+        'cloudflare-ddns'
+        in ddns_compose.containers | map(attribute='Service')
+      - >-
+        (ddns_compose.containers
+         | rejectattr('State', 'equalto', 'running') | list | length) == 0
+    fail_msg: Docker Compose did not leave the DDNS service running
+  when: not ansible_check_mode

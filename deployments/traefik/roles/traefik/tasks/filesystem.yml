@@ -1,0 +1,44 @@
+---
+- name: Create Traefik parent directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+  loop:
+    - "{{ traefik.data_dir | dirname }}"
+    - "{{ traefik.compose_dir | dirname }}"
+  when: item != '/'
+
+- name: Create Traefik data directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+  loop:
+    - "{{ traefik.data_dir }}"
+    - "{{ traefik.data_dir }}/logs"
+
+- name: Create Traefik ACME storage
+  ansible.builtin.file:
+    path: "{{ traefik.data_dir }}/acme.json"
+    state: touch
+    mode: '0600'
+    owner: root
+    group: root
+    access_time: preserve
+    modification_time: preserve
+
+- name: Create Traefik Compose project directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0700'
+    owner: root
+    group: root
+  loop:
+    - "{{ traefik.compose_dir }}"
+    - "{{ traefik.compose_dir }}/secrets"

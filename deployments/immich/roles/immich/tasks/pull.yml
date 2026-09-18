@@ -1,0 +1,17 @@
+---
+- name: Pull Immich project image
+  community.docker.docker_compose_v2_pull:
+    project_src: "{{ immich.compose_dir }}"
+    project_name: immich
+    services:
+      - "{{ item }}"
+    policy: missing
+  loop:
+    - immich-redis
+    - immich-database
+    - immich-machine-learning
+    - immich-server
+  loop_control:
+    label: "{{ item }}"
+  async: 3600
+  poll: 10

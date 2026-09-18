@@ -1,0 +1,51 @@
+---
+- name: Ensure Docker Compose plugin is installed
+  ansible.builtin.package:
+    name: docker-compose-plugin
+    state: present
+
+- name: Ensure Docker is enabled and running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Validate Immich proxy network
+  ansible.builtin.include_role:
+    name: validate_proxy_network
+  vars:
+    validate_proxy_network_name: "{{ immich.proxy_network }}"
+
+- name: Write Immich database secrets
+  ansible.builtin.copy:
+    content: "{{ item.value }}"
+    dest: "{{ immich.compose_dir }}/secrets/{{ item.name }}"
+    mode: '0444'
+    owner: root
+    group: root
+  loop:
+    - name: db_username
+      value: "{{ immich.database.user }}"
+    - name: db_password
+      value: "{{ immich.database.password }}"
+  no_log: true
+
+- name: Render Immich Compose project
+  ansible.builtin.template:
+    src: templates/docker-compose.yaml
+    dest: "{{ immich.compose_dir }}/compose.yaml"
+    mode: '0600'
+    owner: root
+    group: root
+  no_log: true
+
+- name: Validate rendered Immich Compose project
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --project-directory
+      - "{{ immich.compose_dir }}"
+      - config
+      - --quiet
+  changed_when: false

@@ -1,0 +1,40 @@
+---
+- name: Ensure Docker Compose plugin is installed
+  ansible.builtin.package:
+    name: docker-compose-plugin
+    state: present
+
+- name: Ensure Docker is enabled and running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Write DDNS Cloudflare token
+  ansible.builtin.copy:
+    content: "{{ ddns.cf_token | trim }}"
+    dest: "{{ ddns.compose_dir }}/secrets/cf_token"
+    mode: '0444'
+    owner: root
+    group: root
+  no_log: true
+
+- name: Render DDNS Compose project
+  ansible.builtin.template:
+    src: templates/docker-compose.yaml
+    dest: "{{ ddns.compose_dir }}/compose.yaml"
+    mode: '0600'
+    owner: root
+    group: root
+  no_log: true
+
+- name: Validate rendered DDNS Compose project
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --project-directory
+      - "{{ ddns.compose_dir }}"
+      - config
+      - --quiet
+  changed_when: false

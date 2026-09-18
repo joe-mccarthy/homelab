@@ -1,45 +1,293 @@
 ---
-# This playbook orchestrates the deployment of restic backup services to a Docker Swarm cluster.
-# The deployment includes three services:
-#   1. backup - Creates regular backups of the NFS shared data
-#   2. prune - Manages backup retention and removes old backups according to policy
-#   3. check - Verifies backup integrity by scanning the repository
-#
-# The playbook targets the manager group and gates deployment tasks to one selected
-# manager host so commands execute exactly once and avoid duplicate deployments.
-
+# NFS BACKUP DEPLOYMENT
 - name: Deploy NFS Backup Jobs
-  hosts: manager  # Target the manager group in the Swarm cluster.
-  order: shuffle  # Select a manager without always preferring the first inventory host.
-  become: true       # Execute tasks with elevated privileges (sudo)
-                     # Required for Docker operations and filesystem access
+  hosts: nfs_servers
+  become: true
+  any_errors_fatal: true
+  gather_facts: false
   vars:
-    # Use one selected manager host for deployment to avoid `run_once` strategy caveats.
-    nfs_backup_deploy_host: "{{ ansible_play_hosts_all | first }}"
+    deploy_backup_transaction_dir: /run/nfs-backup-deploy-rollback
+    deploy_backup_lock_ready_path: /run/nfs-backup-deploy-lock-ready
+    deploy_backup_transaction_files:
+      - name: restic.env
+        path: "{{ nfs_backup.config_path }}/restic.env"
+        mode: "0600"
+      - name: repository
+        path: "{{ nfs_backup.config_path }}/repository"
+        mode: "0600"
+      - name: password
+        path: "{{ nfs_backup.config_path }}/password"
+        mode: "0600"
+      - name: runner
+        path: /usr/local/sbin/nfs-backup-job
+        mode: "0700"
+      - name: service
+        path: /etc/systemd/system/nfs-backup@.service
+        mode: "0644"
+      - name: backup.timer
+        path: /etc/systemd/system/nfs-backup-backup.timer
+        mode: "0644"
+      - name: prune.timer
+        path: /etc/systemd/system/nfs-backup-prune.timer
+        mode: "0644"
+      - name: check.timer
+        path: /etc/systemd/system/nfs-backup-check.timer
+        mode: "0644"
 
-  # Pre-deployment checks could be added here
-  # Examples:
-  #   - Check if backup target directories exist
-  #   - Verify Docker Swarm is operational
-  #   - Validate storage capacity for backups
+  pre_tasks:
+    - name: Require one authoritative NFS server
+      ansible.builtin.assert:
+        that:
+          - groups['nfs_servers'] | length == 1
+        fail_msg: The deployment requires exactly one host in nfs_servers
+
+    - name: Record managed backup files before deployment
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+      loop: "{{ deploy_backup_transaction_files }}"
+      loop_control:
+        label: "{{ item.path }}"
+      register: deploy_backup_original_files
+
+    - name: Record backup timer enablement before deployment
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-enabled
+          - "nfs-backup-{{ item }}.timer"
+      loop:
+        - backup
+        - prune
+        - check
+      loop_control:
+        label: "{{ item }}"
+      register: deploy_backup_original_timer_states
+      changed_when: false
+      failed_when: false
+
+    - name: Record backup timer activity before deployment
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - "nfs-backup-{{ item }}.timer"
+      loop:
+        - backup
+        - prune
+        - check
+      loop_control:
+        label: "{{ item }}"
+      register: deploy_backup_original_timer_activity
+      changed_when: false
+      failed_when: false
+
+    - name: Reset backup deployment rollback directory
+      ansible.builtin.file:
+        path: "{{ deploy_backup_transaction_dir }}"
+        state: absent
+
+    - name: Create backup deployment rollback directory
+      ansible.builtin.file:
+        path: "{{ deploy_backup_transaction_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Preserve existing managed backup files
+      ansible.builtin.copy:
+        src: "{{ item.item.path }}"
+        dest: "{{ deploy_backup_transaction_dir }}/{{ item.item.name }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "{{ item.item.mode }}"
+      loop: "{{ deploy_backup_original_files.results }}"
+      loop_control:
+        label: "{{ item.item.path }}"
+      when: item.stat.exists
+      no_log: true
 
   tasks:
-    - name: Deploy backup services
-      ansible.builtin.include_role:
-        name: deploy_backup
-      when: inventory_hostname == nfs_backup_deploy_host
+    - name: Deploy backup scheduler transactionally
+      block:
+        - name: Pause existing backup timers during deployment
+          ansible.builtin.systemd:
+            name: "nfs-backup-{{ item.item.name }}"
+            enabled: false
+            state: stopped
+          loop: "{{ deploy_backup_original_files.results }}"
+          loop_control:
+            label: "{{ item.item.name }}"
+          when:
+            - item.item.name is match('.*[.]timer$')
+            - item.stat.exists
 
-# ==============================================================================
-# DEPLOYMENT PROCESS:
-# 1. Install required dependencies (docker-compose)
-# 2. Ensure Docker service is running
-# 3. Remove any existing backup services to avoid conflicts
-# 4. Prepare local directory structure for deployment
-# 5. Deploy the stack using docker stack deploy
-# 6. Clean up temporary files
-#
-# MAINTENANCE NOTES:
-# - The backup encryption key is stored in Ansible Vault (referenced in group_vars/all.yml)
-# - Backup retention policies are defined in the docker-compose template
-# - Services are configured to run on nodes with the "storage" label
-# ==============================================================================
+        - name: Reset backup deployment lock readiness
+          ansible.builtin.file:
+            path: "{{ deploy_backup_lock_ready_path }}"
+            state: absent
+
+        - name: Hold backup host lock during deployment
+          ansible.builtin.shell:
+            cmd: >-
+              nohup sh -c 'exec 9>/run/lock/nfs-backup.lock;
+              flock --nonblock 9 || exit 75;
+              touch {{ deploy_backup_lock_ready_path | quote }};
+              exec sleep infinity'
+              >/dev/null 2>&1 & echo $!
+          register: deploy_backup_maintenance_lock
+          changed_when: true
+
+        - name: Wait for backup deployment lock ownership
+          ansible.builtin.wait_for:
+            path: "{{ deploy_backup_lock_ready_path }}"
+            state: present
+            timeout: 5
+
+        - name: Verify backup deployment lock holder is running
+          ansible.builtin.command:
+            argv:
+              - kill
+              - -0
+              - "{{ deploy_backup_maintenance_lock.stdout | trim }}"
+          register: deploy_backup_maintenance_lock_process
+          changed_when: false
+
+        - name: Block scheduled and manual jobs during maintenance
+          ansible.builtin.file:
+            path: /run/nfs-backup-maintenance
+            state: touch
+            owner: root
+            group: root
+            mode: "0600"
+            access_time: preserve
+            modification_time: preserve
+
+        - name: Prepare scheduled one-shot backup jobs
+          ansible.builtin.include_role:
+            name: deploy_backup
+
+        - name: Enable scheduled one-shot backup jobs
+          ansible.builtin.include_role:
+            name: deploy_backup
+            tasks_from: enable_timers
+
+        - name: End backup maintenance window
+          ansible.builtin.file:
+            path: /run/nfs-backup-maintenance
+            state: absent
+
+        - name: Release backup host lock after cutover
+          ansible.builtin.command:
+            argv:
+              - kill
+              - "{{ deploy_backup_maintenance_lock.stdout | trim }}"
+          changed_when: true
+
+        - name: Remove backup deployment lock readiness
+          ansible.builtin.file:
+            path: "{{ deploy_backup_lock_ready_path }}"
+            state: absent
+
+        - name: Remove backup deployment rollback files
+          ansible.builtin.file:
+            path: "{{ deploy_backup_transaction_dir }}"
+            state: absent
+
+      rescue:
+        - name: Release backup host lock before recovery
+          ansible.builtin.command:
+            argv:
+              - kill
+              - "{{ deploy_backup_maintenance_lock.stdout | trim }}"
+          changed_when: true
+          failed_when: false
+          when: deploy_backup_maintenance_lock is defined
+
+        - name: Stop replacement backup timers
+          ansible.builtin.systemd:
+            name: "nfs-backup-{{ item }}.timer"
+            enabled: false
+            state: stopped
+          loop:
+            - backup
+            - prune
+            - check
+          loop_control:
+            label: "{{ item }}"
+          failed_when: false
+          when: not (deploy_backup_scheduler_activated | default(false) | bool)
+
+        - name: Restore previous managed backup files
+          ansible.builtin.copy:
+            src: "{{ deploy_backup_transaction_dir }}/{{ item.item.name }}"
+            dest: "{{ item.item.path }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "{{ item.item.mode }}"
+          loop: "{{ deploy_backup_original_files.results }}"
+          loop_control:
+            label: "{{ item.item.path }}"
+          no_log: true
+          when:
+            - item.stat.exists
+            - not (deploy_backup_scheduler_activated | default(false) | bool)
+
+        - name: Remove managed backup files introduced by failed deployment
+          ansible.builtin.file:
+            path: "{{ item.item.path }}"
+            state: absent
+          loop: "{{ deploy_backup_original_files.results }}"
+          loop_control:
+            label: "{{ item.item.path }}"
+          when:
+            - not item.stat.exists
+            - not (deploy_backup_scheduler_activated | default(false) | bool)
+
+        - name: Reload restored systemd units
+          ansible.builtin.systemd:
+            daemon_reload: true
+          when: not (deploy_backup_scheduler_activated | default(false) | bool)
+
+        - name: Restore previous backup timer states
+          ansible.builtin.systemd:
+            name: "nfs-backup-{{ item.0.item }}.timer"
+            enabled: "{{ (item.0.stdout | trim) == 'enabled' }}"
+            state: "{{ ((item.1.stdout | trim) == 'active') | ternary('started', 'stopped') }}"
+          loop: >-
+            {{ deploy_backup_original_timer_states.results |
+               zip(deploy_backup_original_timer_activity.results) }}
+          loop_control:
+            label: "{{ item.0.item }}"
+            index_var: timer_index
+          when:
+            - deploy_backup_original_files.results[timer_index + 5].stat.exists
+            - not (deploy_backup_scheduler_activated | default(false) | bool)
+
+        - name: End failed backup maintenance window
+          ansible.builtin.file:
+            path: /run/nfs-backup-maintenance
+            state: absent
+
+        - name: Remove failed backup deployment lock readiness
+          ansible.builtin.file:
+            path: "{{ deploy_backup_lock_ready_path }}"
+            state: absent
+
+        - name: Remove backup deployment rollback files after recovery
+          ansible.builtin.file:
+            path: "{{ deploy_backup_transaction_dir }}"
+            state: absent
+
+        - name: Report rolled-back backup deployment
+          ansible.builtin.fail:
+            msg: >-
+              Backup deployment failed. {{
+                (deploy_backup_scheduler_activated | default(false) | bool) |
+                ternary(
+                  'The validated replacement scheduler remains active; retry legacy Swarm cleanup.',
+                  'Managed files and the previous timer enablement state were restored.'
+                )
+              }}

@@ -1,0 +1,61 @@
+---
+- name: Ensure Docker Compose plugin is installed
+  ansible.builtin.package:
+    name: docker-compose-plugin
+    state: present
+
+- name: Ensure Docker is enabled and running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Validate Traefik proxy network
+  ansible.builtin.include_role:
+    name: validate_proxy_network
+  vars:
+    validate_proxy_network_name: "{{ traefik.proxy_network }}"
+
+- name: Write Traefik Cloudflare secrets
+  ansible.builtin.copy:
+    content: "{{ item.value }}"
+    dest: "{{ traefik.compose_dir }}/secrets/{{ item.name }}"
+    mode: '0600'
+    owner: root
+    group: root
+  loop:
+    - name: cf_token
+      value: "{{ traefik.cf_token }}"
+    - name: cf_email
+      value: "{{ traefik.cf_email }}"
+  no_log: true
+
+- name: Inspect Docker runtime mode
+  ansible.builtin.command:
+    argv:
+      - docker
+      - info
+      - --format
+      - json
+  register: traefik_docker_info
+  changed_when: false
+
+- name: Render Traefik Compose project
+  ansible.builtin.template:
+    src: templates/docker-compose.yaml
+    dest: "{{ traefik.compose_dir }}/compose.yaml"
+    mode: '0600'
+    owner: root
+    group: root
+  no_log: true
+
+- name: Validate rendered Traefik Compose project
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --project-directory
+      - "{{ traefik.compose_dir }}"
+      - config
+      - --quiet
+  changed_when: false

@@ -1,55 +1,30 @@
 ---
-# Immich Photo Management Application Deployment Playbook
-# This is the main entry point for deploying the Immich photo and video management application.
-# Immich provides a self-hosted alternative to Google Photos with AI-powered features.
-
-- name: Deploy Immich stack to Docker Swarm
-  # Main playbook task that orchestrates the complete Immich deployment process.
-  # This includes preparing the environment, setting up storage, and deploying all services.
-  # The deployment creates a fully functional photo management system with web interface.
-
-  hosts: manager
-  order: shuffle
-  # Targets the Docker Swarm manager group for deployment.
-  # Tasks are gated to one selected manager host for single-node deployment.
-
-  become: true
-  # Enables privilege escalation to run tasks as root when necessary.
-  # Required for creating directories, managing Docker services, and setting file permissions.
-  # Many Docker and file system operations require elevated privileges.
-  vars:
-    # Use one selected manager host for deployment to avoid `run_once` strategy caveats.
-    immich_deploy_host: "{{ ansible_play_hosts_all | first }}"
+- name: Validate Immich target
+  hosts: localhost
+  gather_facts: false
 
   tasks:
-    - name: Prepare Immich NFS storage
-      ansible.builtin.include_role:
-        name: check_nfs
-      when: inventory_hostname == immich_deploy_host
-    # First role: Prepares the NFS storage infrastructure for Immich.
-    # Creates all required directories with proper permissions and ownership.
-    # Ensures persistent storage is ready before deploying application containers.
-    # Tasks include:
-    #   - Creating /mnt/nfs/docker/immich and subdirectories
-    #   - Setting 0777 permissions for container access
-    #   - Configuring nobody:nogroup ownership
+    - name: Require an Immich target
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target | default('') | string | trim | length > 0
+        fail_msg: >-
+          Pass an inventory hostname, DNS name, or IP address with
+          -e target=<host-or-address>.
 
-    - name: Deploy Immich stack
-      ansible.builtin.include_role:
-        name: deploy
-      when: inventory_hostname == immich_deploy_host
-    # Second role: Handles the actual application deployment to Docker Swarm.
-    # Processes templates, manages existing services, and deploys the new stack.
-    # Ensures clean deployment by removing old services before creating new ones.
-    # Tasks include:
-    #   - Installing prerequisites (docker-compose)
-    #   - Stopping existing Immich services
-    #   - Processing docker-compose.yaml template with variables
-    #   - Deploying stack to Docker Swarm
-    #   - Cleaning up temporary files
+    - name: Add Immich target to the temporary deployment group
+      ansible.builtin.add_host:
+        name: "{{ target | string | trim }}"
+        groups: deployment_target
 
-# Related Files:
-# - group_vars/all.yml: Contains variable definitions and vault references
-# - templates/docker-compose.yaml: Service definitions and configuration
-# - roles/check_nfs/tasks/main.yml: NFS directory preparation tasks
-# - roles/deploy/tasks/main.yml: Main deployment logic and service management
+- name: Deploy Immich
+  hosts: deployment_target
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+
+  tasks:
+    - name: Run staged Immich deployment
+      ansible.builtin.include_role:
+        name: immich

@@ -1,0 +1,6 @@
+---
+- name: Pull the Traefik image before cutover
+  community.docker.docker_compose_v2_pull:
+    project_src: "{{ traefik.compose_dir }}"
+    project_name: traefik
+    policy: always

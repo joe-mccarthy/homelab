@@ -50,14 +50,15 @@ mqtt:
 # ============================================================================
 serial:
     port: {{ home_assistant.zigbee_serial_port }}
-    # USB serial port where the Zigbee coordinator is connected.
-    # Common values: /dev/ttyUSB0, /dev/ttyACM0, /dev/serial/by-id/...
-    # The value is templated from home_assistant.zigbee_serial_port in group_vars.
+    # Local device path or TCP URL used to reach the Zigbee coordinator.
+    # Examples: /dev/serial/by-id/..., tcp://192.168.1.119:6638
+    # The value is templated from home_assistant.zigbee_serial_port in
+    # group_vars.
 
     baudrate: 115200
-    # Communication speed between Zigbee2MQTT and the coordinator.
+    # Communication speed for a directly attached serial coordinator.
     # 115200 is the standard baudrate for most Zigbee coordinators.
-    # Do not change unless specifically required by your hardware.
+    # This setting is ignored by TCP coordinators.
 
     adapter: zstack
     # Zigbee coordinator adapter type. Common options:

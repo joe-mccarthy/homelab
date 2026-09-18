@@ -1,33 +1,79 @@
 # DDNS Deployment
 
-[![Ansible](https://img.shields.io/badge/Ansible-Automation-EE0000?logo=ansible&logoColor=white&style=flat-square)](https://docs.ansible.com/) [![Docker Swarm](https://img.shields.io/badge/Docker%20Swarm-Service-2496ED?logo=docker&logoColor=white&style=flat-square)](https://docs.docker.com/engine/swarm/) ![Dynamic DNS](https://img.shields.io/badge/Dynamic%20DNS-Automation-1F6FEB?style=flat-square) [![Cloudflare](https://img.shields.io/badge/Cloudflare-DNS%20API-F38020?logo=cloudflare&logoColor=white&style=flat-square)](https://developers.cloudflare.com/dns/) ![cloudflare-ddns](https://img.shields.io/badge/cloudflare--ddns-v1.15.1-5C5C5C?style=flat-square)
+[![Ansible](https://img.shields.io/badge/Ansible-Automation-EE0000?logo=ansible&logoColor=white&style=flat-square)](https://docs.ansible.com/) [![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white&style=flat-square)](https://docs.docker.com/compose/) [![Cloudflare](https://img.shields.io/badge/Cloudflare-DNS%20API-F38020?logo=cloudflare&logoColor=white&style=flat-square)](https://developers.cloudflare.com/dns/) ![cloudflare-ddns](https://img.shields.io/badge/cloudflare--ddns-v1.17.0-5C5C5C?style=flat-square)
 
-This project provides an automated solution for deploying and managing a **Dynamic DNS (DDNS)** service using Ansible. The deployment is designed to ensure seamless updates of DNS records for dynamic IP addresses, enabling reliable access to services hosted on networks with non-static IPs.
+An Ansible-managed, single-host Docker Compose deployment of Favonia Cloudflare DDNS. It periodically reconciles configured DNS records with the gateway's public IPv4 address.
 
-## Overview
+## Runtime Model
 
-The deployment uses Ansible playbooks and roles to configure and manage the DDNS service. It integrates with DNS providers to update records dynamically based on the current IP address of the host. The solution is modular, secure, and easily customizable to fit various environments and DNS providers.
+The container runs on the host passed through `-e target=...`. It has no inbound ports, persistent application data, NFS dependency, or Traefik attachment. Compose retains the project at `/opt/ddns`.
 
-## Features
-
-- **Dynamic DNS Updates**: Automatically updates DNS records for hosts with dynamic IP addresses.
-- **Provider Integration**: Supports integration with popular DNS providers via their APIs.
-- **Secure Secrets Management**: Uses Ansible Vault to securely store API tokens and other sensitive data.
-- **Modular Design**: Simplifies maintenance and customization with dedicated roles for tasks like configuration and deployment.
-- **Scalable**: Easily extendable to manage multiple domains or subdomains.
+The container runs as UID/GID `1000`, uses a read-only root filesystem, drops all Linux capabilities, and enables `no-new-privileges`.
 
 ## Prerequisites
 
-To deploy the DDNS service, you need Ansible installed on the control machine and access to the target host. API credentials for the DNS provider must be configured and encrypted using Ansible Vault.
+- A reachable inventory hostname, DNS name, or IP address passed as `target`.
+- Docker Engine and the Docker Compose v2 plugin on that host.
+- The `community.docker` collection from [`requirements.yml`](../../requirements.yml).
+- Outbound DNS and HTTPS access.
+- A Cloudflare API token with zone read and DNS edit permissions for the configured records.
+- A public IPv4 address. DDNS does not bypass carrier-grade NAT.
 
-## Deployment Process
+## Configuration
 
-The deployment process involves configuring the required variables, securely storing secrets, and running the Ansible playbook to set up the DDNS service. The playbook ensures that the service is properly configured and running, with periodic updates to DNS records.
+Define the token and comma-separated domain list in the encrypted vault:
 
-## Security Considerations
+```yaml
+vault:
+  shared:
+    cloudflare:
+      token: replace-with-a-scoped-token
 
-The deployment emphasizes security by encrypting sensitive data using Ansible Vault. It is recommended to use restrictive permissions for configuration files and to test the deployment in a staging environment before applying it to production.
+  services:
+    ddns:
+      dns_domains: home.example.com,another.example.com
+```
 
-## Troubleshooting
+The token is stored beneath `/opt/ddns/secrets` and mounted through `CLOUDFLARE_API_TOKEN_FILE`; it is not embedded in the Compose file or container environment. Token changes recreate the container.
 
-Common issues such as misconfigured API credentials or DNS provider errors can be resolved by reviewing the Ansible playbook logs and verifying the configuration settings.
+`PROXIED=true` is retained, and IPv6 updates are disabled with `IP6_PROVIDER=none`. The obsolete `ZONE_ID` setting has been removed because this image discovers zones from `DOMAINS`.
+
+## Deploy
+
+Run from the repository root. Include `--extra-vars @vault.yml` when the vault is not already loaded by inventory:
+
+```bash
+ansible-playbook \
+  -i inventory.yml \
+  deployments/ddns/deploy.yml \
+  -e target=odin \
+  --extra-vars @vault.yml \
+  --ask-vault-pass
+```
+
+The role verifies that the Cloudflare token is active, validates and pulls the Compose project, removes the known legacy `ddns_cloudflare-ddns` Swarm service when present, starts the container, and confirms it remains running. It does not prune unrelated Swarm resources.
+
+Immediately before startup, the role stops and removes any existing `cloudflare-ddns` container, including one from an earlier run of this Compose project. Compose then runs with `recreate: always`, so every successful playbook run creates a fresh container. The removal retains volumes and does not perform broad container pruning.
+
+DDNS does not use the shared `proxy` network, so it can be migrated independently of Traefik and the web applications.
+
+| Stage | Task file | Responsibility |
+| --- | --- | --- |
+| 1 | `validate.yml` | Validate configuration and the Cloudflare token |
+| 2 | `filesystem.yml` | Create Compose and secrets directories |
+| 3 | `prepare.yml` | Prepare Docker, secrets, and Compose configuration |
+| 4 | `pull.yml` | Pull the pinned image |
+| 5 | `deploy.yml` | Replace, start, and verify the container |
+
+## Operations
+
+```bash
+sudo docker compose --project-directory /opt/ddns ps
+sudo docker compose --project-directory /opt/ddns logs -f
+sudo docker compose --project-directory /opt/ddns restart cloudflare-ddns
+sudo docker compose --project-directory /opt/ddns config --quiet
+```
+
+After deployment, confirm the logs show successful public IPv4 detection and Cloudflare record reconciliation. Also verify that exactly one DDNS updater is running during and after migration.
+
+Redeploy after changing variables or templates by rerunning Ansible. Do not edit `/opt/ddns/compose.yaml` directly because Ansible replaces it.

@@ -1,19 +1,30 @@
 ---
 home_assistant:
+  # Single-host paths and Docker network
+  data_dir: /exports/docker/home_assistant
+  compose_dir: /opt/home-assistant
+  proxy_network: proxy
+
   # Vault-backed secrets and configuration
-  proxy: "{{ vault.services.home_assistant.proxy }}"               # Trusted proxy IP/CIDR for reverse proxy headers
-  mqtt_server: "{{ vault.services.home_assistant.mqtt_server }}"   # MQTT broker address for IoT device communication
-  zigbee_serial_port: "{{ vault.services.home_assistant.zigbee_serial_port }}"  # USB path for Zigbee coordinator dongle
+  # Trusted proxy IP/CIDR for reverse proxy headers
+  proxy: "{{ vault.services.home_assistant.proxy }}"
+  # MQTT broker address used by Zigbee2MQTT
+  mqtt_server: "{{ vault.services.home_assistant.mqtt_server }}"
+  # Local device path or TCP URL for the Zigbee coordinator
+  zigbee_serial_port: "{{ vault.services.home_assistant.zigbee_serial_port }}"
 
   # Pinned image tags for reproducible deployments
   versions:
-    homeassistant: "2026.7.2"
-    zigbee2mqtt: "2.12.1"
+    homeassistant: "2026.8.3"
+    zigbee2mqtt: "2.13.0"
     mqtt: "2.1.2-alpine"
     matter_server: "1.4.0"
 
 # Notes:
-# - All vault.services.home_assistant.* variables must be defined and encrypted in Ansible Vault.
+# - The play targets the host passed with -e target=<host-or-address>.
+# - data_dir is local to that host; it does not need to be an NFS mount.
+# - Define and encrypt all vault.services.home_assistant.* variables in the
+#   Ansible Vault.
 # - To edit encrypted variables: ansible-vault edit group_vars/all.yml
 # - proxy should be the IP/CIDR of your reverse proxy (e.g., "172.18.0.0/16").
-# - zigbee_serial_port must match the host USB device path (e.g., "/dev/ttyUSB0").
+# - zigbee_serial_port accepts a local /dev path or a tcp:// URL.

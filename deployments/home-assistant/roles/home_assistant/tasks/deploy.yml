@@ -1,0 +1,74 @@
+---
+- name: Remove legacy Home Assistant Swarm services before deployment
+  ansible.builtin.include_role:
+    name: remove_legacy_swarm_services
+  vars:
+    remove_legacy_swarm_services_list:
+      - home_assistant_homeassistant
+      - home_assistant_zigbee2mqtt
+      - home_assistant_matter-server
+      - home_assistant_matter-server-proxy
+      - home_assistant_mqtt
+
+- name: Remove existing Home Assistant containers before deployment
+  community.docker.docker_container:
+    name: "{{ item }}"
+    state: absent
+    keep_volumes: true
+    stop_timeout: 60
+  loop:
+    - homeassistant
+    - zigbee2mqtt
+    - matter-server
+    - mqtt
+    - matter-server-proxy
+  loop_control:
+    label: "{{ item }}"
+
+- name: Ensure Matter Server data belongs to its container user
+  ansible.builtin.file:
+    path: "{{ home_assistant.data_dir }}/matter-server/data"
+    state: directory
+    owner: '1000'
+    group: '1000'
+    recurse: true
+
+- name: Create and start Home Assistant containers
+  community.docker.docker_compose_v2:
+    project_src: "{{ home_assistant.compose_dir }}"
+    project_name: home_assistant
+    state: present
+    pull: never
+    recreate: always
+    remove_orphans: true
+    wait: true
+    wait_timeout: 180
+  register: home_assistant_compose
+
+- name: Verify every Home Assistant service is running
+  ansible.builtin.assert:
+    that:
+      - >-
+        home_assistant_expected_services
+        | difference(home_assistant_actual_services)
+        | length == 0
+      - home_assistant_non_running_services | length == 0
+    fail_msg: >-
+      Compose did not start every service. Missing:
+      {{ home_assistant_expected_services
+         | difference(home_assistant_actual_services) }};
+      not running: {{ home_assistant_non_running_services }}
+  vars:
+    home_assistant_expected_services:
+      - homeassistant
+      - matter-server
+      - mqtt
+      - zigbee2mqtt
+    home_assistant_actual_services: >-
+      {{ home_assistant_compose.containers
+         | map(attribute='Service') | unique | list }}
+    home_assistant_non_running_services: >-
+      {{ home_assistant_compose.containers
+         | rejectattr('State', 'equalto', 'running')
+         | map(attribute='Service') | unique | list }}
+  when: not ansible_check_mode

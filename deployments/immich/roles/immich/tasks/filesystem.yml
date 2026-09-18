@@ -1,0 +1,66 @@
+---
+- name: Create Immich data directory
+  ansible.builtin.file:
+    path: "{{ immich.data_dir }}"
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: Create Immich application data directories
+  ansible.builtin.file:
+    path: "{{ immich.data_dir }}/{{ item }}"
+    state: directory
+    mode: '0750'
+    owner: root
+    group: root
+  loop:
+    - backups
+    - ml
+    - upload
+
+- name: Create Immich database directory
+  ansible.builtin.file:
+    path: "{{ immich.data_dir }}/database"
+    state: directory
+    mode: '0700'
+    owner: '999'
+    group: '999'
+
+- name: Identify the Immich database filesystem
+  ansible.builtin.command:
+    argv:
+      - stat
+      - --file-system
+      - --format=%T
+      - "{{ immich.data_dir }}/database"
+  register: immich_database_filesystem
+  changed_when: false
+
+- name: Require a supported local database filesystem
+  ansible.builtin.assert:
+    that:
+      - immich_database_filesystem.stdout in immich_local_filesystems
+    fail_msg: >-
+      {{ immich.data_dir }}/database uses unsupported filesystem
+      {{ immich_database_filesystem.stdout }}. PostgreSQL must use local
+      storage.
+  vars:
+    immich_local_filesystems:
+      - btrfs
+      - ext2/ext3
+      - ext4
+      - f2fs
+      - xfs
+      - zfs
+
+- name: Create Immich Compose project directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0700'
+    owner: root
+    group: root
+  loop:
+    - "{{ immich.compose_dir }}"
+    - "{{ immich.compose_dir }}/secrets"

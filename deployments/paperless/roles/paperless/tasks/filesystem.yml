@@ -1,0 +1,75 @@
+---
+- name: Create Paperless data directory
+  ansible.builtin.file:
+    path: "{{ paperless.data_dir }}"
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: Create Paperless application data directories
+  ansible.builtin.file:
+    path: "{{ paperless.data_dir }}/{{ item }}"
+    state: directory
+    mode: '0750'
+    owner: "{{ paperless.uid }}"
+    group: "{{ paperless.gid }}"
+  loop:
+    - consume
+    - data
+    - export
+    - media
+
+- name: Create Paperless broker data directory
+  ansible.builtin.file:
+    path: "{{ paperless.data_dir }}/broker"
+    state: directory
+    mode: '0750'
+    owner: '999'
+    group: '999'
+
+- name: Create Paperless PostgreSQL data directory
+  ansible.builtin.file:
+    path: "{{ paperless.database.data_dir }}"
+    state: directory
+    mode: '0700'
+    owner: '999'
+    group: '999'
+
+- name: Identify the Paperless PostgreSQL filesystem
+  ansible.builtin.command:
+    argv:
+      - stat
+      - --file-system
+      - --format=%T
+      - "{{ paperless.database.data_dir }}"
+  register: paperless_database_filesystem
+  changed_when: false
+
+- name: Require a supported local PostgreSQL filesystem
+  ansible.builtin.assert:
+    that:
+      - paperless_database_filesystem.stdout in paperless_local_filesystems
+    fail_msg: >-
+      {{ paperless.database.data_dir }} uses unsupported filesystem
+      {{ paperless_database_filesystem.stdout }}. PostgreSQL must use local
+      storage.
+  vars:
+    paperless_local_filesystems:
+      - btrfs
+      - ext2/ext3
+      - ext4
+      - f2fs
+      - xfs
+      - zfs
+
+- name: Create Paperless Compose project directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0700'
+    owner: root
+    group: root
+  loop:
+    - "{{ paperless.compose_dir }}"
+    - "{{ paperless.compose_dir }}/secrets"

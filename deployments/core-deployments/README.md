@@ -1,8 +1,8 @@
 # Core Deployments
 
-[![Ansible](https://img.shields.io/badge/Ansible-Automation-EE0000?logo=ansible&logoColor=white&style=flat-square)](https://docs.ansible.com/) [![Docker Swarm](https://img.shields.io/badge/Docker%20Swarm-Foundation-2496ED?logo=docker&logoColor=white&style=flat-square)](https://docs.docker.com/engine/swarm/) [![Traefik](https://img.shields.io/badge/Traefik-Core%20Dependency-24A1C1?logo=traefikproxy&logoColor=white&style=flat-square)](https://doc.traefik.io/traefik/) ![DDNS](https://img.shields.io/badge/DDNS-Core%20Dependency-1F6FEB?style=flat-square)
+[![Ansible](https://img.shields.io/badge/Ansible-Automation-EE0000?logo=ansible&logoColor=white&style=flat-square)](https://docs.ansible.com/) [![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white&style=flat-square)](https://docs.docker.com/compose/) [![Docker Swarm](https://img.shields.io/badge/Docker%20Swarm-Legacy-2496ED?logo=docker&logoColor=white&style=flat-square)](https://docs.docker.com/engine/swarm/) [![Traefik](https://img.shields.io/badge/Traefik-Core%20Dependency-24A1C1?logo=traefikproxy&logoColor=white&style=flat-square)](https://doc.traefik.io/traefik/) ![DDNS](https://img.shields.io/badge/DDNS-Core%20Dependency-1F6FEB?style=flat-square)
 
-Before deploying other services in this repository (or custom services), deploy this stack first. These deployments provide essential functionality and dependencies for other services, including updates, access, and security. This Ansible playbook is a collection of imports for the individual playbooks of each core deployment.
+Before deploying other services in this repository, deploy these core services first. Traefik and DDNS run with Docker Compose on the single `nfs_servers` host; Cioban remains a legacy Swarm deployment. This playbook imports each individual deployment in sequence.
 
 ## Traefik
 

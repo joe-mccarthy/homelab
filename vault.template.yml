@@ -52,13 +52,8 @@ vault:
         access_key: ""
 
     paperless:
-      volumes:
-        paperless:
-          media: ""
-          data: ""
-          consume: ""
-          export: ""
-        broker: ""
+      secret_key: ""
+      database_password: ""
 
     portainer:
       admin_password: ""

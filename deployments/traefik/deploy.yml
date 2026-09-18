@@ -1,32 +1,30 @@
 ---
-# This playbook is responsible for deploying the Traefik stack to the Docker Swarm cluster.
-# It performs the following tasks:
-# 1. Ensures that the required NFS directory structure for Traefik exists and is properly configured.
-# 2. Deploys the Traefik stack using Docker Swarm by leveraging the `deploy_traefik` role.
+- name: Validate Traefik target
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: Require a Traefik target
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target | default('') | string | trim | length > 0
+        fail_msg: >-
+          Pass an inventory hostname, DNS name, or IP address with
+          -e target=<host-or-address>.
+
+    - name: Add Traefik target to the temporary deployment group
+      ansible.builtin.add_host:
+        name: "{{ target | string | trim }}"
+        groups: deployment_target
 
 - name: Deploy Traefik
-  hosts: manager  # Target the manager group instead of hard-coding a specific index.
-  order: shuffle  # Select a manager without always preferring the first inventory host.
-  become: true  # Execute tasks with elevated privileges (sudo) to ensure proper permissions.
-  vars:
-    traefik_deploy_host: "{{ ansible_play_hosts_all | first }}"
+  hosts: deployment_target
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+
   tasks:
-    - name: Ensure Traefik NFS paths exist
+    - name: Run staged Traefik deployment
       ansible.builtin.include_role:
-        name: check_nfs
-      when: inventory_hostname == traefik_deploy_host
-
-    - name: Deploy Traefik stack
-      ansible.builtin.include_role:
-        name: deploy_traefik
-      when: inventory_hostname == traefik_deploy_host
-
-# Notes:
-# - Ensure that the `manager` group is properly defined in the Ansible inventory file, with at least one manager node.
-# - The `check_nfs` role should verify and create the necessary NFS directory structure for Traefik.
-# - The `deploy_traefik` role should include tasks to prepare the environment, create Docker secrets, and deploy the stack.
-# - This playbook assumes that the Docker Swarm cluster is already initialized and functional.
-# - Always test the deployment in a staging environment before applying it to production.
-# - Use `become: true` cautiously and ensure that the user running the playbook has the necessary sudo privileges.
-# - Modular roles like `check_nfs` and `deploy_traefik` improve reusability and maintainability across similar deployments.
-# - Tasks run only on the first host selected for the play, ensuring a single-manager deployment.
+        name: traefik

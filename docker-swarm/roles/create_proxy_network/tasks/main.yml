@@ -10,6 +10,7 @@
     # The `name` parameter specifies the name of the Docker network. In this case, it is "proxy".
 
     driver: overlay  # The network driver to use.
+    attachable: true  # Allow Compose containers to share the proxy network.
     # The `driver` parameter specifies the type of network to create.
     # "overlay" is used for multi-host networking in Docker Swarm, enabling communication between containers on different nodes.
 

@@ -1,0 +1,70 @@
+---
+- name: Validate required Traefik configuration
+  ansible.builtin.assert:
+    that:
+      - traefik is defined
+      - (traefik | default({})).data_dir | default('') | length > 1
+      - (traefik | default({})).data_dir | default('') is match('^/')
+      - (traefik | default({})).compose_dir | default('') | length > 1
+      - (traefik | default({})).compose_dir | default('') is match('^/')
+      - (traefik | default({})).proxy_network | default('') | length > 0
+      - (traefik | default({})).cf_token | default('') | length > 0
+      - (traefik | default({})).cf_email | default('') | length > 0
+      - >-
+        ((((vault | default({})).shared | default({})).general | default({}))
+        .domain | default('') | length) > 0
+    fail_msg: >-
+      Traefik paths must be absolute and all required network, Cloudflare, and
+      domain settings must be non-empty.
+  no_log: true
+
+- name: Validate Traefik published ports
+  ansible.builtin.assert:
+    that:
+      - (item.value | string) is match('^[0-9]+$')
+      - item.value | int >= 1
+      - item.value | int <= 65535
+    fail_msg: "Traefik port {{ item.name }} must be between 1 and 65535."
+  loop:
+    - name: web
+      value: "{{ traefik.ports.web }}"
+    - name: websecure
+      value: "{{ traefik.ports.websecure }}"
+    - name: ssh
+      value: "{{ traefik.ports.ssh }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Inspect managed Traefik directory paths
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ traefik.data_dir | dirname }}"
+    - "{{ traefik.data_dir }}"
+    - "{{ traefik.data_dir }}/logs"
+    - "{{ traefik.compose_dir | dirname }}"
+    - "{{ traefik.compose_dir }}"
+    - "{{ traefik.compose_dir }}/secrets"
+  register: traefik_managed_directories
+
+- name: Reject non-directory managed paths
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (item.stat.isdir | default(false))
+    fail_msg: "{{ item.item }} exists but is not a directory."
+  loop: "{{ traefik_managed_directories.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Inspect existing Traefik ACME storage
+  ansible.builtin.stat:
+    path: "{{ traefik.data_dir }}/acme.json"
+  register: traefik_acme_storage
+
+- name: Reject invalid Traefik ACME storage
+  ansible.builtin.assert:
+    that:
+      - >-
+        not traefik_acme_storage.stat.exists
+        or (traefik_acme_storage.stat.isreg | default(false))
+    fail_msg: "{{ traefik.data_dir }}/acme.json must be a regular file."

@@ -12,9 +12,9 @@ all:
   children:
 
     # -------------------------------------------------------------------------
-    # nfs_servers: the node that exports NFS shares to the rest of the cluster.
-    # The IP of this host is auto-resolved via ansible_default_ipv4.address and
-    # used for NFS mount paths across the cluster.
+    # nfs_servers: the node that exports NFS shares to legacy Swarm nodes and
+    # runs the single-host Docker Compose deployments. The IP of this host is
+    # auto-resolved via ansible_default_ipv4.address for legacy NFS mounts.
     #
     # odin doubles as the NFS server. All host vars are defined here;
     # the manager group references the same hostname without repeating them.
@@ -26,7 +26,6 @@ all:
           ansible_user: pi
           swarm_labels:
             storage: "true"
-            matter: "true"  # Keep this label on exactly one trusted-LAN node.
 
     # -------------------------------------------------------------------------
     # cluster: parent group that encompasses every Swarm node.

@@ -1,282 +1,99 @@
-version: '3.8'
+---
+# Traefik label keys and Jinja expressions are intentionally kept intact.
+# yamllint disable rule:line-length
+name: immich
 
 services:
   immich-server:
     container_name: immich_server
-    # Sets the container name to `immich_server` for easier identification and management.
-
     image: "ghcr.io/immich-app/immich-server:{{ immich.versions.server }}"
-    # Specifies the Docker image for Immich server from GitHub Container Registry.
-    # Version is pinned to a stable release for reproducible deployments.
-
-    volumes:
-      - /mnt/nfs/docker/immich/upload:/usr/src/app/upload
-      # Mounts the NFS upload directory to store user-uploaded photos and videos.
-      # This is the primary storage location for all media files.
-
-      - /mnt/nfs/docker/immich/backups:/usr/src/app/upload/backups
-      # Mounts the backup directory for database exports and configuration backups.
-      # Provides data redundancy and disaster recovery capabilities.
-
-      - /etc/localtime:/etc/localtime:ro
-      # Mounts the host's local time configuration as read-only.
-      # Synchronizes container time with host system for accurate timestamps.
-
-
+    restart: unless-stopped
     networks:
-      - proxy
-      # Connects to the external proxy network for Traefik reverse proxy access.
-      # Enables external web access through the reverse proxy.
-
       - default
-      # Connects to the default overlay network for internal service communication.
-      # Allows communication with database, Redis, and machine learning services.
-
-    depends_on:
-      - immich-redis
-      - immich-database
-
+      - proxy
+    volumes:
+      - "{{ immich.data_dir }}/upload:/data"
+      - "{{ immich.data_dir }}/backups:/data/backups"
+      - /etc/localtime:/etc/localtime:ro
+    secrets:
+      - db_username
+      - db_password
     environment:
-      DB_USERNAME: "{{ immich.database.user }}"
-      # Database username from Ansible vault for secure credential management.
-      # Variable is defined in group_vars and encrypted in vault.
-
-      DB_PASSWORD: "{{ immich.database.password }}"
-      # Database password from Ansible vault for secure credential management.
-      # Variable is defined in group_vars and encrypted in vault.
-
-      POSTGRES_DB: immich
-      # Specifies the PostgreSQL database name that Immich will use.
-      # Must match the database name configured in the database service.
-
+      DB_USERNAME_FILE: /run/secrets/db_username
+      DB_PASSWORD_FILE: /run/secrets/db_password
+      DB_DATABASE_NAME: "{{ immich.database.name }}"
       DB_HOSTNAME: immich-database
-      # Hostname of the PostgreSQL database service within the Docker network.
-      # Must match the service name of the database container.
-
       REDIS_HOSTNAME: immich-redis
-      # Hostname of the Redis cache service within the Docker network.
-      # Must match the service name of the Redis container.
-
-    restart: always
-    # Ensures the container automatically restarts on failure or system reboot.
-    # Provides high availability for the main application service.
-
+    depends_on:
+      immich-redis:
+        condition: service_healthy
+      immich-database:
+        condition: service_healthy
     healthcheck:
       disable: false
-      # Enables Docker's built-in health checking for this service.
-      # Allows Docker Swarm to monitor service health and restart if needed.
-
-    deploy:
-      mode: replicated
-      # Uses replicated deployment mode for the service.
-
-      replicas: 1
-      # Runs exactly one instance of the Immich server.
-      # Multiple replicas would require additional configuration for shared storage.
-
-      labels:
-          - "traefik.enable=true"
-          # Enables Traefik integration for this service.
-          # Tells Traefik to route traffic to this container.
-
-          - "traefik.http.routers.immich.entrypoints=web"
-          # Defines the entry point for HTTP traffic (port 80) for the `immich` router.
-          # Creates a router for insecure HTTP traffic.
-
-          - "traefik.http.routers.immich.rule=Host(`immich.{{ vault.shared.general.domain }}`)"
-          # Specifies the routing rule for HTTP traffic. Requests to `immich.<domain>` are routed to this service.
-          # Uses Ansible templating to inject the domain from variables.
-
-          - "traefik.http.middlewares.immich-https-redirect.redirectscheme.scheme=https"
-          # Redirects HTTP traffic to HTTPS for secure communication.
-          # Creates a middleware that forces HTTPS for all requests.
-
-          - "traefik.http.routers.immich.middlewares=immich-https-redirect"
-          # Applies the HTTPS redirection middleware to the `immich` router.
-          # Ensures all HTTP requests are automatically redirected to HTTPS.
-
-          - "traefik.http.routers.immich-secure.entrypoints=websecure"
-          # Defines the entry point for HTTPS traffic (port 443) for the `immich-secure` router.
-          # Creates a router for secure HTTPS traffic.
-
-          - "traefik.http.routers.immich-secure.rule=Host(`immich.{{ vault.shared.general.domain }}`)"
-          # Specifies the routing rule for HTTPS traffic. Requests to `immich.<domain>` are routed to this service.
-          # Matches the same domain as HTTP but for secure traffic.
-
-          - "traefik.http.routers.immich-secure.tls=true"
-          # Enables TLS (HTTPS) for the `immich-secure` router.
-          # Activates SSL/TLS encryption for this route.
-
-          - "traefik.http.routers.immich-secure.service=immich"
-          # Associates the `immich-secure` router with the `immich` service.
-          # Links the HTTPS router to the load balancer service definition.
-
-          - "traefik.http.routers.immich-secure.tls.certresolver=letsencrypt"
-          # Configures Traefik to use the Let's Encrypt certificate resolver for automatic SSL certificate management.
-          # Enables automatic SSL certificate generation and renewal.
-
-          - "traefik.http.services.immich.loadbalancer.server.port=2283"
-          # Specifies the internal port (2283) of the immich service to which Traefik should route traffic.
-          # Tells Traefik which port the application is listening on inside the container.
-
-          - "traefik.docker.network=proxy"
-          # Specifies the Docker network (`proxy`) that Traefik should use to communicate with the service.
-          # Ensures Traefik uses the correct network for service discovery.
+    labels:
+      traefik.enable: 'true'
+      traefik.http.routers.immich.entrypoints: web
+      traefik.http.routers.immich.rule: >-
+        Host(`immich.{{ vault.shared.general.domain }}`)
+      traefik.http.middlewares.immich-https-redirect.redirectscheme.scheme: >-
+        https
+      traefik.http.routers.immich.middlewares: immich-https-redirect
+      traefik.http.routers.immich-secure.entrypoints: websecure
+      traefik.http.routers.immich-secure.rule: >-
+        Host(`immich.{{ vault.shared.general.domain }}`)
+      traefik.http.routers.immich-secure.tls: 'true'
+      traefik.http.routers.immich-secure.service: immich
+      traefik.http.routers.immich-secure.tls.certresolver: letsencrypt
+      traefik.http.services.immich.loadbalancer.server.port: '2283'
+      traefik.docker.network: "{{ immich.proxy_network }}"
 
   immich-machine-learning:
     container_name: immich_machine_learning
-    # Sets the container name for the machine learning service.
-    # Handles AI features like face recognition, object detection, and image classification.
-
-    image: "ghcr.io/immich-app/immich-machine-learning:{{ immich.versions.machine_learning }}"
-    # Specifies the machine learning Docker image from GitHub Container Registry.
-    # Contains TensorFlow models and processing capabilities for AI features.
-
+    image: >-
+      ghcr.io/immich-app/immich-machine-learning:{{ immich.versions.machine_learning }}
+    restart: unless-stopped
     volumes:
-      - /mnt/nfs/docker/immich/ml:/cache
-      # Mounts NFS storage for machine learning model cache and processing data.
-      # Stores downloaded models and temporary processing files.
-
-    restart: always
-    # Ensures the ML service automatically restarts on failure.
-    # Critical for maintaining AI functionality across the application.
-
-    networks:
-      - default
-      # Connects only to the default network for internal communication.
-      # Does not need external access as it only serves internal requests.
-
+      - "{{ immich.data_dir }}/ml:/cache"
     healthcheck:
       disable: false
-      # Enables health checking for the machine learning service.
-      # Allows monitoring of AI processing capabilities.
-
-    deploy:
-      mode: replicated
-      # Uses replicated deployment mode for the ML service.
-
-      replicas: 1
-      # Runs one instance of the machine learning service.
-      # ML processing is typically CPU/GPU intensive, single instance is usually sufficient.
-
-      labels:
-        - "traefik.enable=false"
-        # Disables Traefik routing for this service.
-        # ML service is internal-only and should not be accessible from outside.
 
   immich-redis:
     container_name: immich_redis
-    # Sets the container name for the Redis cache service.
-    # Provides high-performance caching and session storage for the application.
-
     image: "docker.io/valkey/valkey:{{ immich.versions.redis }}"
-    # Uses Valkey (Redis fork) for caching and session management.
-    # Version 8 based on Debian Bookworm with specific SHA256 hash for security.
-
+    restart: unless-stopped
     healthcheck:
-      test: redis-cli ping || exit 1
-      # Health check command that pings Redis to verify it's responding.
-      # Returns exit code 1 if Redis is not responding to commands.
-
-    restart: always
-    # Ensures Redis automatically restarts on failure.
-    # Cache availability is critical for application performance.
-
-    networks:
-      - default
-      # Connects to default network for internal service communication.
-      # Redis should only be accessible by internal services.
-
-    deploy:
-      mode: replicated
-      # Uses replicated deployment mode for Redis.
-
-      replicas: 1
-      # Runs one Redis instance.
-      # Single instance is sufficient for this deployment size.
-
-      labels:
-        - "traefik.enable=false"
-        # Disables Traefik routing for Redis.
-        # Redis is internal-only and should never be exposed externally.
+      test:
+        - CMD-SHELL
+        - redis-cli ping || exit 1
 
   immich-database:
     container_name: immich_postgres
-    # Sets the container name for the PostgreSQL database service.
-    # Stores all application data including metadata, user accounts, and configurations.
-
     image: "ghcr.io/immich-app/postgres:{{ immich.versions.database }}"
-    # Custom PostgreSQL image with vector extensions for AI/ML features.
-    # Includes pgvectors extension for similarity search and vectorchord for performance.
-
-    networks:
-      - default
-      # Connects to default network for internal service communication.
-      # Database should only be accessible by internal services.
-
+    restart: unless-stopped
+    secrets:
+      - db_username
+      - db_password
     environment:
-      POSTGRES_PASSWORD: "{{ immich.database.password }}"
-      # Database password from Ansible vault for secure access.
-      # Used by the postgres superuser account.
-
-      POSTGRES_USER: "{{ immich.database.user }}"
-      # Database username from Ansible vault.
-      # Creates a custom user account with appropriate permissions.
-
-      POSTGRES_DB: immich
-      # Creates the immich database on container startup.
-      # This is the main database that the application will use.
-
-      POSTGRES_INITDB_ARGS: '--data-checksums'
-      # Enables data checksums during database initialization.
-      # Provides data integrity checking and corruption detection.
-
+      POSTGRES_USER_FILE: /run/secrets/db_username
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      POSTGRES_DB: "{{ immich.database.name }}"
+      POSTGRES_INITDB_ARGS: --data-checksums
     volumes:
-      - /mnt/nfs/docker/immich/database:/var/lib/postgresql/data
-      # Mounts NFS storage for persistent database data.
-      # Ensures data survives container restarts and updates.
-
-    restart: always
-    # Ensures database automatically restarts on failure.
-    # Database availability is critical for all application functionality.
-
-    deploy:
-      mode: replicated
-      # Uses replicated deployment mode for the database.
-
-      replicas: 1
-      # Runs one database instance.
-      # Single instance avoids complexity of database clustering.
-
-      labels:
-        - "traefik.enable=false"
-        # Disables Traefik routing for the database.
-        # Database must never be accessible from outside the internal network.
-
+      - "{{ immich.data_dir }}/database:/var/lib/postgresql/data"
+    shm_size: 128mb
     healthcheck:
-      test: pg_isready -U postgres || exit 1
-      # Health check using PostgreSQL's pg_isready utility.
-      # Verifies that the database is accepting connections.
-
-      interval: 30s
-      # Runs health check every 30 seconds.
-      # Balances responsiveness with resource usage.
-
-      timeout: 10s
-      # Allows 10 seconds for the health check to complete.
-      # Sufficient time for database to respond under normal load.
-
-      retries: 5
-      # Retries health check 5 times before marking as unhealthy.
-      # Prevents false positives during temporary high load.
+      disable: false
 
 networks:
+  default:
+    name: immich_compose
   proxy:
     external: true
-    # References the external proxy network managed by Traefik.
-    # This network must exist and be created by the Traefik deployment.
+    name: "{{ immich.proxy_network }}"
 
-  default:
-    driver: overlay
-    # Creates an overlay network for internal service communication.
-    # Enables secure communication between containers across Docker Swarm nodes.
+secrets:
+  db_username:
+    file: ./secrets/db_username
+  db_password:
+    file: ./secrets/db_password

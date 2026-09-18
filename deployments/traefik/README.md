@@ -1,36 +1,122 @@
 # Traefik Deployment
 
-[![Ansible](https://img.shields.io/badge/Ansible-Automation-EE0000?logo=ansible&logoColor=white&style=flat-square)](https://docs.ansible.com/) [![Docker Swarm](https://img.shields.io/badge/Docker%20Swarm-Ingress-2496ED?logo=docker&logoColor=white&style=flat-square)](https://docs.docker.com/engine/swarm/) [![Let's Encrypt](https://img.shields.io/badge/Let%27s%20Encrypt-TLS-003A70?logo=letsencrypt&logoColor=white&style=flat-square)](https://letsencrypt.org/docs/) [![Cloudflare](https://img.shields.io/badge/Cloudflare-DNS%20Challenge-F38020?logo=cloudflare&logoColor=white&style=flat-square)](https://developers.cloudflare.com/dns/) ![Traefik](https://img.shields.io/badge/Traefik-v3.6.11-5C5C5C?style=flat-square)
+[![Ansible](https://img.shields.io/badge/Ansible-Automation-EE0000?logo=ansible&logoColor=white&style=flat-square)](https://docs.ansible.com/) [![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white&style=flat-square)](https://docs.docker.com/compose/) [![Let's Encrypt](https://img.shields.io/badge/Let's%20Encrypt-TLS-003A70?logo=letsencrypt&logoColor=white&style=flat-square)](https://letsencrypt.org/docs/) [![Cloudflare](https://img.shields.io/badge/Cloudflare-DNS%20Challenge-F38020?logo=cloudflare&logoColor=white&style=flat-square)](https://developers.cloudflare.com/dns/) ![Traefik](https://img.shields.io/badge/Traefik-v3.7.12-5C5C5C?style=flat-square)
 
-This project provides an automated solution for deploying and managing **Traefik** in a Docker Swarm environment using Ansible. Traefik is a modern reverse proxy and load balancer that simplifies the management of microservices by dynamically routing traffic to services based on their configuration.
+An Ansible-managed, single-host Docker Compose deployment of Traefik. It discovers local containers through the Docker provider and legacy Swarm services through the Swarm provider, routes HTTP, HTTPS, and SSH traffic, and obtains wildcard certificates with a Cloudflare DNS-01 challenge.
 
-## Overview
+## Runtime Model
 
-The deployment uses Ansible playbooks and roles to automate the setup and configuration of Traefik in a Docker Swarm cluster. It includes tasks for preparing the environment, managing persistent storage, and securely configuring Traefik for dynamic routing and HTTPS support.
+Traefik runs on the host passed through `-e target=...` using ordinary Docker Compose, Docker and Swarm providers, a shared external network, and file-backed Compose secrets.
 
-## Features
+The container joins the external `proxy` network. On a Swarm manager this can be the existing attachable overlay, allowing Traefik to reach both Compose containers and legacy Swarm services. Other Compose services must join the same network and place their Traefik labels directly under the service-level `labels` key.
 
-- **Dynamic Reverse Proxy**: Automatically discovers and routes traffic to services based on Docker labels.
-- **Docker Swarm Integration**: Deploys Traefik as a service in a Swarm cluster for high availability and scalability.
-- **Secure Secrets Management**: Uses Ansible Vault to securely store sensitive data like API tokens and credentials.
-- **Let's Encrypt Integration**: Automates the issuance and renewal of SSL/TLS certificates using DNS-based challenges.
-- **Persistent Storage**: Configures NFS directories to ensure data persistence for certificates and logs.
-- **Comprehensive Logging**: Supports access and error logging for monitoring and debugging.
+The rendered project remains at `/opt/traefik` so normal `docker compose` commands can manage it after deployment. Persistent certificates and logs live under `/exports/docker/traefik` by default.
 
 ## Prerequisites
 
-To deploy Traefik, you need a Docker Swarm cluster, Ansible installed on the control machine, and access to an NFS server for persistent storage. Configuration values and secrets must be defined and encrypted using Ansible Vault. A DNS provider (e.g., Cloudflare) is required for managing DNS-based challenges for Let's Encrypt.
+- A reachable inventory hostname, DNS name, or IP address passed as `target`.
+- Docker Engine and the Docker Compose v2 plugin on that host.
+- The `community.docker` Ansible collection from [`requirements.yml`](../../requirements.yml).
+- Ports `80`, `443`, and `2222` available, unless overridden in the vault.
+- Public DNS records directed to the host.
+- Cloudflare credentials and the public domain defined in Ansible Vault.
 
-## Deployment Process
+The Cloudflare token should be limited to DNS zone read and edit permissions for the required zone.
 
-The deployment process involves preparing the environment, ensuring the required directory structure exists, and deploying the Traefik stack using Docker Swarm. The Ansible playbooks automate these tasks, ensuring consistency and reliability. Traefik is configured to dynamically route traffic to services based on Docker labels and to handle HTTPS traffic using Let's Encrypt.
+The external `proxy` network must already exist; this deployment does not manage it. [`home_server/setup.yml`](../../home_server/setup.yml) creates it when absent and safely rejects an existing non-attachable Swarm overlay. New Swarm setups create the overlay as attachable. Existing clusters must recreate a non-attachable overlay during a maintenance window before Compose containers can join it.
 
-## Security Considerations
+## Deploy
 
-The deployment emphasizes security by encrypting sensitive data, restricting permissions on configuration files, and automating the issuance of SSL/TLS certificates. It is recommended to test the deployment in a staging environment before applying it to production.
+Run from the repository root:
 
-The Traefik dashboard and API are not published directly on the host. The insecure API listener is disabled, API debug endpoints are disabled, and dashboard access is routed through `https://traefik.<domain>` with a Traefik IP allowlist middleware. Configure trusted dashboard source ranges in `vault.services.traefik.dashboard.allowed_ips` as a comma-separated list. Set `vault.services.traefik.dashboard.enabled` to `false` to disable the dashboard route entirely.
+```bash
+ansible-playbook -i inventory.yml deployments/traefik/deploy.yml \
+  -e target=odin --extra-vars @vault.yml --ask-vault-pass
+```
 
-## Troubleshooting
+Add `--ask-become-pass` if the remote user requires a sudo password.
 
-Common issues such as missing directories, uninitialized Docker Swarm, or misconfigured secrets can be resolved by verifying the environment setup and reviewing Ansible playbook logs.
+The deployment uses one Traefik role with five ordered task files:
+
+| Stage | Task file | Responsibility |
+| --- | --- | --- |
+| Validate | [`validate.yml`](roles/traefik/tasks/validate.yml) | Validates required settings, ports, and the types of existing managed paths without modifying the host. Missing directories are valid. |
+| Filesystem | [`filesystem.yml`](roles/traefik/tasks/filesystem.yml) | Creates parent directories, persistent data, logs, ACME storage, Compose, and secret paths with their required ownership and modes. |
+| Prepare | [`prepare.yml`](roles/traefik/tasks/prepare.yml) | Ensures Docker is running, writes secrets, and renders and validates the Compose project. |
+| Pull | [`pull.yml`](roles/traefik/tasks/pull.yml) | Pulls the pinned Traefik image before the existing proxy is interrupted. |
+| Deploy | [`deploy.yml`](roles/traefik/tasks/deploy.yml) | Removes the legacy Swarm service and old container, starts the replacement, and verifies that it is running. |
+
+[`roles/traefik/tasks/main.yml`](roles/traefik/tasks/main.yml) imports these files in deployment order. The top-level playbook includes only the `traefik` role.
+
+The role removes the legacy `traefik_traefik` Swarm service and the fixed container name `traefik`; it does not prune unrelated services or containers. The external `proxy` network and other workloads attached to it remain intact during Traefik recreation.
+
+## Configuration
+
+The deployment reads these vault values:
+
+```yaml
+vault:
+  shared:
+    cloudflare:
+      email: admin@example.com
+      token: replace-with-a-scoped-token
+    general:
+      domain: example.com
+
+  services:
+    traefik:
+      ports:
+        web: "80"
+        websecure: "443"
+        ssh: "2222"
+      dashboard:
+        enabled: true
+        allowed_ips: "192.168.1.0/24"
+```
+
+Cloudflare values are mounted as Compose secrets at `/run/secrets/cf_email` and `/run/secrets/cf_token`; they are not embedded in the rendered Compose file or container environment.
+
+Every playbook run recreates the Traefik container, so file-backed credential changes are always picked up immediately.
+
+The dashboard is available at `https://traefik.<domain>` when enabled. It is not published on port `8080`, and both HTTP and HTTPS dashboard routes enforce the configured source-range allowlist.
+
+## Persistent Files
+
+```text
+/exports/docker/traefik
+├── acme.json
+└── logs
+    └── traefik.log
+```
+
+The role preserves the existing `acme.json` at this path across container removal and recreation.
+
+## Operations
+
+Check the container:
+
+```bash
+sudo docker compose --project-directory /opt/traefik ps
+```
+
+Follow logs:
+
+```bash
+sudo docker compose --project-directory /opt/traefik logs -f
+```
+
+Validate the rendered project:
+
+```bash
+sudo docker compose --project-directory /opt/traefik config --quiet
+```
+
+Redeploy after changing variables or templates by rerunning the Ansible playbook. Every run removes and recreates the `traefik` container while preserving `traefik.data_dir`. Do not edit the rendered files because Ansible replaces them.
+
+## Security
+
+- Keep the Docker socket mount read-only, but treat the Traefik container as host-root equivalent because Docker API access is privileged.
+- Keep `/opt/traefik`, its Compose file, and credential files readable only by root.
+- Restrict the dashboard allowlist to trusted networks.
+- Back up `acme.json`; it contains private certificate keys.
+- Do not publish an insecure dashboard listener.

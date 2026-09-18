@@ -1,0 +1,63 @@
+---
+- name: Remove legacy Immich Swarm services before deployment
+  ansible.builtin.include_role:
+    name: remove_legacy_swarm_services
+  vars:
+    remove_legacy_swarm_services_list:
+      - immich_immich-database
+      - immich_immich-machine-learning
+      - immich_immich-redis
+      - immich_immich-server
+
+- name: Remove existing Immich containers before deployment
+  community.docker.docker_container:
+    name: "{{ item }}"
+    state: absent
+    keep_volumes: true
+    stop_timeout: 30
+  loop:
+    - immich_server
+    - immich_machine_learning
+    - immich_redis
+    - immich_postgres
+  loop_control:
+    label: "{{ item }}"
+
+- name: Create and start Immich containers
+  community.docker.docker_compose_v2:
+    project_src: "{{ immich.compose_dir }}"
+    project_name: immich
+    state: present
+    pull: never
+    recreate: always
+    remove_orphans: true
+    wait: true
+    wait_timeout: 300
+  register: immich_compose
+
+- name: Verify every Immich service is running
+  ansible.builtin.assert:
+    that:
+      - >-
+        immich_expected_services
+        | difference(immich_actual_services)
+        | length == 0
+      - immich_non_running_services | length == 0
+    fail_msg: >-
+      Compose did not start every Immich service. Missing:
+      {{ immich_expected_services | difference(immich_actual_services) }};
+      not running: {{ immich_non_running_services }}
+  vars:
+    immich_expected_services:
+      - immich-database
+      - immich-machine-learning
+      - immich-redis
+      - immich-server
+    immich_actual_services: >-
+      {{ immich_compose.containers
+         | map(attribute='Service') | unique | list }}
+    immich_non_running_services: >-
+      {{ immich_compose.containers
+         | rejectattr('State', 'equalto', 'running')
+         | map(attribute='Service') | unique | list }}
+  when: not ansible_check_mode

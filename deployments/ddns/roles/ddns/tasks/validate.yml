@@ -1,0 +1,29 @@
+---
+- name: Validate DDNS configuration
+  ansible.builtin.assert:
+    that:
+      - ddns.cf_token | string | trim | length > 0
+      - ddns.dns_domains | string | trim | length > 0
+    fail_msg: DDNS Cloudflare token and domains must not be empty
+  no_log: true
+
+- name: Verify DDNS Cloudflare token
+  ansible.builtin.uri:
+    url: https://api.cloudflare.com/client/v4/user/tokens/verify
+    method: GET
+    headers:
+      Authorization: "Bearer {{ ddns.cf_token | trim }}"
+    return_content: true
+    status_code: 200
+  register: ddns_cloudflare_token_verification
+  no_log: true
+
+- name: Require an active DDNS Cloudflare token
+  ansible.builtin.assert:
+    that:
+      - ddns_cloudflare_token_verification.json.success | default(false)
+      - >-
+        ddns_cloudflare_token_verification.json.result.status
+        | default('') == 'active'
+    fail_msg: The Cloudflare API token is not active
+  no_log: true

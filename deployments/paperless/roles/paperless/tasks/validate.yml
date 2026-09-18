@@ -1,0 +1,145 @@
+---
+- name: Require the local application data root
+  ansible.builtin.stat:
+    path: "{{ paperless.data_dir | dirname }}"
+  register: paperless_data_parent
+
+- name: Verify the local application data root
+  ansible.builtin.assert:
+    that:
+      - paperless_data_parent.stat.exists
+      - paperless_data_parent.stat.isdir
+    fail_msg: >-
+      {{ paperless.data_dir | dirname }} must exist on the single Compose host
+
+- name: Inspect the legacy Paperless SQLite database
+  ansible.builtin.stat:
+    path: "{{ paperless.data_dir }}/data/db.sqlite3"
+  register: paperless_legacy_sqlite_database
+
+- name: Inspect the legacy Paperless export manifest
+  ansible.builtin.stat:
+    path: "{{ paperless.data_dir }}/export/manifest.json"
+  register: paperless_legacy_export_manifest
+
+- name: Require legacy SQLite export before PostgreSQL cutover
+  ansible.builtin.assert:
+    that:
+      - not paperless_legacy_sqlite_database.stat.exists
+      - >-
+        not (paperless_legacy_export_manifest.stat.exists | default(false))
+        or (paperless.sqlite_migration | bool)
+      - >-
+        not (paperless.sqlite_migration | bool)
+        or (paperless.allow_fresh_install | bool)
+      - >-
+        not (paperless.sqlite_migration | bool)
+        or (
+          (paperless_legacy_export_manifest.stat.isreg | default(false))
+          and (paperless_legacy_export_manifest.stat.size | default(0) | int > 0)
+        )
+    fail_msg: >-
+      PostgreSQL cutover requires the documented SQLite export/import workflow.
+      Archive {{ paperless.data_dir }}/data/db.sqlite3, retain a non-empty
+      export/manifest.json, and set both paperless_sqlite_migration=true and
+      paperless_allow_fresh_install=true for the migration deployment.
+
+- name: Inspect the existing Paperless PostgreSQL cluster
+  ansible.builtin.stat:
+    path: >-
+      {{ paperless.database.data_dir }}/{{ paperless.database.major_version
+      }}/docker/PG_VERSION
+  register: paperless_database_version
+
+- name: Require the existing Paperless PostgreSQL cluster
+  ansible.builtin.assert:
+    that:
+      - >-
+        (paperless.allow_fresh_install | bool)
+        or (
+          (paperless_database_version.stat.exists | default(false))
+          and (paperless_database_version.stat.isreg | default(false))
+          and (paperless_database_version.stat.size | default(0) | int > 0)
+        )
+    fail_msg: >-
+      {{ paperless.database.data_dir }} must contain the initialized PostgreSQL
+      {{ paperless.database.major_version }} cluster. Correct the data path
+      before replacing the running containers, or explicitly set
+      paperless_allow_fresh_install=true for an intentional new installation.
+
+- name: Read the Paperless PostgreSQL cluster version
+  ansible.builtin.slurp:
+    src: >-
+      {{ paperless.database.data_dir }}/{{ paperless.database.major_version
+      }}/docker/PG_VERSION
+  register: paperless_database_version_file
+  when: paperless_database_version.stat.exists | default(false)
+
+- name: Require the configured Paperless PostgreSQL major version
+  ansible.builtin.assert:
+    that:
+      - >-
+        paperless_database_version_file.content | b64decode | trim
+        == paperless.database.major_version
+    fail_msg: >-
+      The existing Paperless PostgreSQL cluster does not match configured major
+      version {{ paperless.database.major_version }}.
+  when: paperless_database_version.stat.exists | default(false)
+
+- name: Inspect the existing Paperless media directory
+  ansible.builtin.stat:
+    path: "{{ paperless.data_dir }}/media"
+  register: paperless_media_directory
+
+- name: Inspect the existing Paperless application data directory
+  ansible.builtin.stat:
+    path: "{{ paperless.data_dir }}/data"
+  register: paperless_application_data_directory
+
+- name: Require the existing Paperless application data directory
+  ansible.builtin.assert:
+    that:
+      - >-
+        (paperless.allow_fresh_install | bool)
+        or (
+          (paperless_application_data_directory.stat.exists | default(false))
+          and (paperless_application_data_directory.stat.isdir | default(false))
+        )
+    fail_msg: >-
+      {{ paperless.data_dir }}/data must be the existing application data
+      directory. Correct the data path before replacing the running containers,
+      or explicitly set paperless_allow_fresh_install=true for an intentional
+      new installation.
+
+- name: Require the existing Paperless media directory
+  ansible.builtin.assert:
+    that:
+      - >-
+        (paperless.allow_fresh_install | bool)
+        or (
+          (paperless_media_directory.stat.exists | default(false))
+          and (paperless_media_directory.stat.isdir | default(false))
+        )
+    fail_msg: >-
+      {{ paperless.data_dir }}/media must be the existing document media
+      directory. Correct the data path before replacing the running containers,
+      or explicitly set paperless_allow_fresh_install=true for an intentional
+      new installation.
+
+- name: Validate Paperless secret key
+  ansible.builtin.assert:
+    that:
+      - paperless.secret_key | string | trim | length >= 32
+    fail_msg: Paperless secret_key must contain at least 32 characters
+  no_log: true
+
+- name: Validate Paperless database configuration
+  ansible.builtin.assert:
+    that:
+      - paperless.database.name | string | trim | length > 0
+      - paperless.database.user | string | trim | length > 0
+      - paperless.database.password | string | trim | length >= 32
+    fail_msg: >-
+      Paperless database name and user must not be empty, and its password must
+      contain at least 32 characters.
+  no_log: true

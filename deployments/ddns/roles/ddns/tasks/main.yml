@@ -1,0 +1,15 @@
+---
+- name: Validate DDNS configuration
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Create DDNS filesystem
+  ansible.builtin.import_tasks: filesystem.yml
+
+- name: Prepare DDNS deployment
+  ansible.builtin.import_tasks: prepare.yml
+
+- name: Pull DDNS image
+  ansible.builtin.import_tasks: pull.yml
+
+- name: Deploy DDNS container
+  ansible.builtin.import_tasks: deploy.yml

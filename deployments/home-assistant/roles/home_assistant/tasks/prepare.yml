@@ -1,0 +1,81 @@
+---
+- name: Ensure Docker Compose plugin is installed
+  ansible.builtin.package:
+    name: docker-compose-plugin
+    state: present
+
+- name: Ensure Docker is enabled and running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Validate Home Assistant proxy network
+  ansible.builtin.include_role:
+    name: validate_proxy_network
+  vars:
+    validate_proxy_network_name: "{{ home_assistant.proxy_network }}"
+
+- name: Render Home Assistant Compose project
+  ansible.builtin.template:
+    src: templates/docker-compose.yaml
+    dest: "{{ home_assistant.compose_dir }}/compose.yaml"
+    mode: '0600'
+    owner: root
+    group: root
+  no_log: true
+
+- name: Validate rendered Home Assistant Compose project
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --project-directory
+      - "{{ home_assistant.compose_dir }}"
+      - config
+      - --quiet
+  changed_when: false
+
+- name: Inspect local Zigbee coordinator
+  ansible.builtin.stat:
+    path: "{{ home_assistant.zigbee_serial_port }}"
+    follow: true
+  register: home_assistant_zigbee_device
+  when: home_assistant.zigbee_serial_port.startswith('/dev/')
+
+- name: Require attached local Zigbee coordinator
+  ansible.builtin.assert:
+    that:
+      - home_assistant_zigbee_device.stat.exists
+      - home_assistant_zigbee_device.stat.ischr | default(false)
+    fail_msg: >-
+      {{ home_assistant.zigbee_serial_port }} is not an attached character
+      device. Fix the vault path before replacing the running containers.
+  when: home_assistant.zigbee_serial_port.startswith('/dev/')
+
+- name: Read persisted Zigbee2MQTT configuration
+  ansible.builtin.slurp:
+    src: "{{ home_assistant.data_dir }}/zigbee2mqtt/data/configuration.yaml"
+  register: home_assistant_zigbee_config_file
+  no_log: true
+
+- name: Read persisted Zigbee2MQTT connection settings
+  ansible.builtin.set_fact:
+    home_assistant_configured_mqtt_server: >-
+      {{ (home_assistant_zigbee_config_file.content
+          | b64decode | from_yaml).mqtt.server | default('') }}
+    home_assistant_configured_zigbee_port: >-
+      {{ (home_assistant_zigbee_config_file.content
+          | b64decode | from_yaml).serial.port | default('') }}
+  no_log: true
+
+- name: Require synchronized Zigbee2MQTT settings
+  ansible.builtin.assert:
+    that:
+      - home_assistant_configured_mqtt_server == home_assistant.mqtt_server
+      - >-
+        home_assistant_configured_zigbee_port
+        == home_assistant.zigbee_serial_port
+    fail_msg: >-
+      The persisted Zigbee2MQTT MQTT or serial setting differs from the vault.
+      Update both before replacing the running containers.

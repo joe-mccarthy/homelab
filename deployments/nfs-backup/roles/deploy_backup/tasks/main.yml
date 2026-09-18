@@ -1,27 +1,280 @@
 ---
-# These tasks deploy and configure restic backup services on Docker Swarm
-# The deployment includes backup, prune, and check services that work together
-# to create a complete backup solution for NFS-shared data
+# PREPARE A SAFE, ONE-SHOT RESTIC INSTALLATION
+#
+# This role intentionally stops before enabling any timer. The parent playbook
+# calls `enable_timers.yml` only after installation and validation succeed.
 
-# Run common Docker prerequisites and remove old services before redeploying.
-- name: Run shared Docker prerequisites and cleanup
-  ansible.builtin.include_role:
-    name: docker_prereqs_and_stop
-  vars:
-    docker_prereqs_and_stop_services_to_stop:
-      - nfs_backup_restic_backup
-      - nfs_backup_restic_prune
-      - nfs_backup_restic_check
-  # This task ensures Docker and Docker Compose are installed and running on the target system.
-  # It also removes any existing Docker Swarm services related to the NFS backup stack to
-  # ensure a clean deployment environment.
+# `flock`, used by the runner to serialize jobs, is provided by util-linux on
+# Debian and Ubuntu systems.
+- name: Install job locking dependency
+  ansible.builtin.package:
+    name: util-linux
+    state: present
 
-- name: Deploy Services
-  ansible.builtin.include_role:
-    name: copy_and_deploy
-  vars:
-    copy_and_deploy_stack_name: nfs_backup_restic
+# Every scheduled operation is a local `docker run`, so the Docker daemon must
+# start now and automatically after a reboot.
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
 
-- name: Clean up compose directory
-  ansible.builtin.include_role:
-    name: cleanup
+# Validate secrets before writing files. Newline
+# characters cannot be represented safely by Docker's line-based env-file
+# syntax. Password files also trim surrounding whitespace in Restic, so reject
+# a key whose meaning would change when Restic reads it.
+- name: Validate protected backup settings
+  ansible.builtin.assert:
+    that:
+      - nfs_backup.encryption_key | string | length > 0
+      - nfs_backup.s3.bucket | string | length > 0
+      - nfs_backup.s3.region | string | length > 0
+      - nfs_backup.s3.key_id | string | length > 0
+      - nfs_backup.s3.access_key | string | length > 0
+      - nfs_backup.encryption_key == (nfs_backup.encryption_key | trim)
+      - nfs_backup.s3.bucket | regex_search('[\r\n]') == none
+      - nfs_backup.s3.region | regex_search('[\r\n]') == none
+      - nfs_backup.s3.key_id | regex_search('[\r\n]') == none
+      - nfs_backup.s3.access_key | regex_search('[\r\n]') == none
+    fail_msg: >-
+      Repository settings must be non-empty single-line values and the
+      encryption key must not have surrounding whitespace
+  no_log: true
+
+# The shell runner has explicit implementations for these three scheduled jobs.
+# Reject misspellings or unknown job keys rather than installing broken timers.
+- name: Validate configured jobs
+  ansible.builtin.assert:
+    that:
+      - nfs_backup.jobs.keys() | sort == ['backup', 'check', 'prune']
+    fail_msg: nfs_backup.jobs must define backup, check, and prune
+
+# The source is a host bind mount. Docker's `--mount` would reject a missing
+# source at runtime, but checking it now gives a clear deployment error.
+- name: Check backup source path
+  ansible.builtin.stat:
+    path: "{{ nfs_backup.source_path }}"
+  register: deploy_backup_source
+
+# `stat.isdir` proves both that the path exists and that it is a directory.
+- name: Require backup source directory
+  ansible.builtin.assert:
+    that:
+      - deploy_backup_source.stat.isdir | default(false)
+    fail_msg: >-
+      Backup source {{ nfs_backup.source_path }} is not a directory on
+      {{ inventory_hostname }}
+
+# Resolve paths on the managed host so symlinks and `..` cannot bypass the
+# restore isolation guard. The restore directory may not exist yet.
+- name: Resolve canonical backup source path
+  ansible.builtin.command:
+    argv:
+      - realpath
+      - --canonicalize-existing
+      - "{{ nfs_backup.source_path }}"
+  register: deploy_backup_canonical_source
+  changed_when: false
+
+- name: Resolve canonical managed backup paths
+  ansible.builtin.command:
+    argv:
+      - realpath
+      - --canonicalize-missing
+      - "{{ item.path }}"
+  loop:
+    - name: restore_path
+      path: "{{ nfs_backup.restore_path }}"
+    - name: cache_path
+      path: "{{ nfs_backup.cache_path }}"
+    - name: config_path
+      path: "{{ nfs_backup.config_path }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: deploy_backup_canonical_managed_paths
+  changed_when: false
+
+- name: Keep managed backup paths outside the backup source
+  ansible.builtin.assert:
+    that:
+      - >-
+        item.stdout
+        != deploy_backup_canonical_source.stdout
+      - deploy_backup_canonical_source.stdout != '/'
+      - item.stdout != '/'
+      - >-
+        not item.stdout.startswith(
+          deploy_backup_canonical_source.stdout ~ '/'
+        )
+      - >-
+        not deploy_backup_canonical_source.stdout.startswith(
+          item.stdout ~ '/'
+        )
+    fail_msg: >-
+      {{ item.item.name }} {{ item.item.path }} must resolve outside backup
+      source {{ nfs_backup.source_path }} to protect credentials and prevent
+      generated or restored files from entering later backups
+  loop: "{{ deploy_backup_canonical_managed_paths.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+# Directory permissions are deliberately root-only:
+# - config_path contains secrets;
+# - cache_path contains repository metadata;
+# - restore_path may contain recovered sensitive data.
+- name: Create backup job directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ nfs_backup.config_path }}"
+      mode: "0700"
+    - path: "{{ nfs_backup.cache_path }}"
+      mode: "0700"
+    - path: "{{ nfs_backup.restore_path }}"
+      mode: "0700"
+  loop_control:
+    label: "{{ item.path }}"
+
+# Render non-file Restic and AWS settings. `no_log` also suppresses Ansible diff
+# output because this rendered file contains the S3 secret access key.
+- name: Install protected Restic environment
+  ansible.builtin.template:
+    src: restic.env.j2
+    dest: "{{ nfs_backup.config_path }}/restic.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+# Restic supports reading the repository URL from a file. Keeping it separate
+# avoids placing the value directly in the container environment and allows the
+# runner to bind-mount it read-only.
+- name: Install protected repository location
+  ansible.builtin.copy:
+    content: "{{ nfs_backup.s3.bucket }}"
+    dest: "{{ nfs_backup.config_path }}/repository"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+# Restic reads this file through RESTIC_PASSWORD_FILE. It is never passed as a
+# command-line argument, where it could appear in a process listing.
+- name: Install protected repository password
+  ansible.builtin.copy:
+    content: "{{ nfs_backup.encryption_key }}"
+    dest: "{{ nfs_backup.config_path }}/password"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+# Install the single entry point used by systemd and manual operator commands.
+# Mode 0700 means only root can execute it or inspect its rendered
+# configuration.
+- name: Install one-shot backup runner
+  ansible.builtin.template:
+    src: nfs-backup-job.j2
+    dest: /usr/local/sbin/nfs-backup-job
+    owner: root
+    group: root
+    mode: "0700"
+
+# A systemd template unit uses `%i` as an instance name. For example,
+# `nfs-backup@backup.service` invokes the runner with the argument `backup`.
+- name: Install backup service template
+  ansible.builtin.template:
+    src: nfs-backup@.service.j2
+    dest: /etc/systemd/system/nfs-backup@.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: deploy_backup_service_unit
+
+# Render one timer per item in nfs_backup.jobs. Each timer activates a matching
+# instance of the service template; timers themselves consume negligible
+# resources and do not keep a container running.
+- name: Install backup timers
+  ansible.builtin.template:
+    src: nfs-backup.timer.j2
+    dest: "/etc/systemd/system/nfs-backup-{{ item.key }}.timer"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ nfs_backup.jobs | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: deploy_backup_timer_units
+
+# systemd does not automatically notice unit files written under /etc. Reload
+# only when a service or timer definition actually changed.
+- name: Reload systemd units
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: deploy_backup_service_unit.changed or deploy_backup_timer_units.changed
+
+# Ask systemd to parse every installed unit before enabling it. This catches
+# invalid calendar expressions, missing executables, and unsupported directives
+# on the target host.
+- name: Validate installed systemd units
+  ansible.builtin.command:
+    argv:
+      - systemd-analyze
+      - verify
+      - /etc/systemd/system/nfs-backup@.service
+      - /etc/systemd/system/nfs-backup-backup.timer
+      - /etc/systemd/system/nfs-backup-prune.timer
+      - /etc/systemd/system/nfs-backup-check.timer
+  changed_when: false
+
+# This command pulls the pinned image when necessary and lists the latest
+# expected snapshot. `SKIP_INIT=true` means a typo in the bucket cannot silently
+# create a new, empty repository.
+- name: Verify backup image and repository access
+  ansible.builtin.command:
+    cmd: /usr/local/sbin/nfs-backup-job verify
+  register: deploy_backup_repository_check
+  changed_when: false
+  environment:
+    NFS_BACKUP_MAINTENANCE: "1"
+
+# Opening any Restic repository is not enough: it could be the wrong repository.
+# Require an existing snapshot created for host `nfs-backup`, source path
+# `/exports/docker`, and tag `nfs-backup`. Compact snapshot output starts each
+# snapshot row with an eight-character hexadecimal ID, which this assertion
+# detects.
+- name: Require existing backup history
+  ansible.builtin.assert:
+    that:
+      - >-
+        deploy_backup_repository_check.stdout |
+        regex_findall('(?m)^[0-9a-f]{8}[ ]') | length > 0
+    fail_msg: >-
+      The configured repository has no nfs-backup snapshot for /exports/docker
+      with tag nfs-backup; refusing to enable scheduled jobs
+
+# Repository lock objects indicate that backup, prune, or another write may be
+# active. Listing lock IDs is read-only and returns full 64-character IDs.
+- name: Inspect live repository locks
+  ansible.builtin.command:
+    cmd: /usr/local/sbin/nfs-backup-job restic list locks
+  register: deploy_backup_repository_locks
+  changed_when: false
+  environment:
+    NFS_BACKUP_MAINTENANCE: "1"
+
+# Never enable scheduled jobs while Restic reports a lock. A stale lock must be
+# investigated and explicitly removed by an operator before retrying.
+- name: Refuse to interrupt an active repository operation
+  ansible.builtin.assert:
+    that:
+      - >-
+        deploy_backup_repository_locks.stdout |
+        regex_findall('(?m)^[0-9a-f]{64}$') | length == 0
+    fail_msg: >-
+      The Restic repository has a lock; confirm that no operation is active,
+      remove stale locks if necessary, and rerun the deployment

@@ -1,65 +1,29 @@
-version: '3.8'
+---
+name: ddns
 
 services:
   cloudflare-ddns:
+    container_name: cloudflare-ddns
     image: "favonia/cloudflare-ddns:{{ ddns.version }}"
-    # The Docker image for the Cloudflare DDNS service, pulled from Docker Hub.
-    # Version is pinned to a stable release for reproducible deployments.
-
-    restart: always
-    # Ensures the container automatically restarts if it stops unexpectedly.
-    # This is useful for maintaining high availability of the DDNS service.
-
-    user: "1000:1000"
-    # Runs the container as a non-root user for improved security.
-    # Replace `1000:1000` with the appropriate user and group IDs for your environment.
-
+    restart: unless-stopped
+    user: "{{ ddns.uid }}:{{ ddns.gid }}"
     read_only: true
-    # Mounts the container's filesystem as read-only to prevent unauthorized modifications.
-    # This is a security best practice for containers that do not require write access.
-
-    cap_drop: [all]
-    # Drops all Linux capabilities from the container to minimize its privileges.
-    # This reduces the attack surface and enhances security.
-
-    security_opt: [no-new-privileges:true]
-    # Ensures the container cannot gain additional privileges, even if a vulnerability is exploited.
-    # This is a security feature to prevent privilege escalation.
-
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    secrets:
+      - cf_token
     environment:
-      - CLOUDFLARE_API_TOKEN={{ ddns.cf_token }}
-      # The API token used to authenticate with the Cloudflare API.
-      # This value is securely stored in Ansible Vault and injected at runtime.
+      CLOUDFLARE_API_TOKEN_FILE: /run/secrets/cf_token
+      DOMAINS: "{{ ddns.dns_domains }}"
+      PROXIED: 'true'
+      IP6_PROVIDER: none
 
-      - DOMAINS={{ ddns.dns_domains }}
-      # A comma-separated list of domains for which DNS records need to be updated.
-      # This value is securely stored in Ansible Vault and injected at runtime.
+networks:
+  default:
+    name: ddns_compose
 
-      - ZONE_ID={{ vault.shared.general.domain }}
-      # The Cloudflare Zone ID associated with the domains.
-      # This value is securely stored in Ansible Vault and injected at runtime.
-
-      - PROXIED=true
-      # Indicates whether the DNS records should be proxied through Cloudflare.
-      # Set to `true` to enable Cloudflare's proxy (e.g., for caching and DDoS protection).
-
-      - IP6_PROVIDER=none
-      # Specifies the IPv6 provider. Set to `none` if IPv6 is not used or required.
-
-    deploy:
-      mode: replicated
-      # Deployment mode for the service. `replicated` ensures a specific number of replicas are running.
-
-      replicas: 1
-      # The number of replicas (instances) of the service to run. In this case, only one instance is deployed.
-
-      labels:
-        - "traefik.enable=false"
-        # Disables Traefik integration for this service. Set to `true` if Traefik should manage routing for this service.
-
-# Notes:
-# - Ensure that `ddns.cf_token`, `ddns.dns_domains`, and `vault.shared.general.domain` are defined and encrypted in Ansible Vault.
-# - Image version is pinned to reduce unexpected changes during future deploys.
-# - The `read_only`, `cap_drop`, and `security_opt` settings are security best practices and should be retained unless specific write access or privileges are required.
-# - If Traefik is used for routing, set `traefik.enable` to `true` and configure additional labels for routing rules.
-# - Always test changes in a staging environment before deploying to production.
+secrets:
+  cf_token:
+    file: ./secrets/cf_token

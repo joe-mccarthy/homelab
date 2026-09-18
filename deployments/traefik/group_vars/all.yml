@@ -1,8 +1,15 @@
 ---
+# Vault fallback expressions are intentionally kept intact.
+# yamllint disable rule:line-length
 traefik:
-  # Cloudflare credentials for DNS-01 ACME challenge (delivered as Docker Swarm secrets)
-  cf_token: "{{ vault.shared.cloudflare.token }}"   # API token — scoped to DNS zone edit only
-  cf_email: "{{ vault.shared.cloudflare.email }}"   # Cloudflare account email
+  # Single-host paths and Docker network
+  data_dir: /exports/docker/traefik
+  compose_dir: /opt/traefik
+  proxy_network: proxy
+
+  # Cloudflare credentials for the DNS-01 ACME challenge
+  cf_token: "{{ vault.shared.cloudflare.token }}"
+  cf_email: "{{ vault.shared.cloudflare.email }}"
 
   # Published host ports
   ports:
@@ -10,17 +17,17 @@ traefik:
     websecure: "{{ ((vault.services.traefik | default({})).ports | default({})).websecure | default('443') }}"
     ssh: "{{ ((vault.services.traefik | default({})).ports | default({})).ssh | default('2222') }}"
 
-  # Dashboard/API exposure through the HTTPS router.
-  # `allowed_ips` is a comma-separated Traefik source range list.
+  # Dashboard/API exposure through the protected HTTPS router
   dashboard:
     enabled: "{{ ((vault.services.traefik | default({})).dashboard | default({})).enabled | default(true) }}"
     allowed_ips: "{{ ((vault.services.traefik | default({})).dashboard | default({})).allowed_ips | default('10.0.0.0/8,172.16.0.0/12,192.168.0.0/16') }}"
 
   # Pinned image tag for reproducible deployments
-  version: "3.6.11"
+  version: "3.7.12"
 
 # Notes:
-# - vault.services.traefik.cf_token and vault.services.traefik.cf_email must be defined and encrypted in Ansible Vault.
-# - To edit encrypted variables: ansible-vault edit group_vars/all.yml
-# - cf_token should have minimum required permissions (DNS zone edit) only.
-# - Credentials are injected as Docker Swarm secrets, not environment variables.
+# - The play targets the host passed with -e target=<host-or-address>.
+# - data_dir is local to that host; it does not need to be an NFS mount.
+# - Cloudflare credentials are written to root-only files and mounted as
+#   Docker Compose secrets.
+# - The token should have only DNS zone read and edit permissions.

@@ -1,21 +1,110 @@
 ---
+# USER-CONFIGURABLE NFS BACKUP SETTINGS
+#
+# This file contains safe configuration and references to secret values. The
+# actual password and S3 credentials live in Ansible Vault under
+# `vault.services.nfs_backup`; do not replace those references with plaintext.
+# See README.md for a complete configuration reference and examples.
 nfs_backup:
-  # Repository encryption key — loss of this key makes all backups permanently inaccessible
+  # RESTIC REPOSITORY ENCRYPTION
+  #
+  # Restic encrypts repository contents before uploading them. This password
+  # is not an S3 login. Losing it makes every snapshot permanently unreadable,
+  # so keep an offline copy in a password manager or other secure location.
   encryption_key: "{{ vault.services.nfs_backup.encryption_key }}"
 
-  # S3-compatible storage backend
+  # S3-COMPATIBLE OBJECT STORAGE
+  #
+  # Restic accepts AWS S3 and compatible providers such as MinIO, Backblaze,
+  # Wasabi, or a NAS object-storage endpoint. The bucket value includes the
+  # `s3:` backend prefix expected by Restic.
   s3:
-    bucket: "{{ vault.services.nfs_backup.s3.bucket }}"       # S3 bucket URL (e.g., s3:https://endpoint/bucket-name)
-    region: "{{ vault.services.nfs_backup.s3.region }}"       # AWS/S3 region (e.g., us-east-1)
-    key_id: "{{ vault.services.nfs_backup.s3.key_id }}"       # S3 access key ID
-    access_key: "{{ vault.services.nfs_backup.s3.access_key }}" # S3 secret access key
+    # Repository location, for example:
+    # s3:https://s3.example.com/homelab-restic
+    bucket: "{{ vault.services.nfs_backup.s3.bucket }}"
+    # Region required by the provider, for example: us-east-1
+    region: "{{ vault.services.nfs_backup.s3.region }}"
+    # Access-key identifier, similar to a username.
+    key_id: "{{ vault.services.nfs_backup.s3.key_id }}"
+    # Secret access key, similar to a password.
+    access_key: "{{ vault.services.nfs_backup.s3.access_key }}"
 
-  # Pinned image tag for reproducible deployments
+  # CONTAINER IMAGE VERSION
+  #
+  # This is the Resticker image release, not the underlying Restic version.
+  # Pinning the tag avoids an unreviewed image change during a redeployment.
   version: "1.8.2"
 
-# Notes:
-# - All vault.services.nfs_backup.* variables must be defined and encrypted in Ansible Vault.
-# - To edit encrypted variables: ansible-vault edit group_vars/all.yml
+  # HOST FILESYSTEM PATHS
+  #
+  # `source_path` is the data being protected. It is mounted read-only inside
+  # backup containers so Restic cannot modify the source.
+  source_path: /exports/docker
+  # Restored files are written here instead of over the live source data.
+  restore_path: /restore
+  # Restic metadata cache retained between otherwise disposable containers.
+  cache_path: /var/cache/nfs-backup
+  # Root-only files containing repository settings and credentials.
+  config_path: /etc/nfs-backup
+
+  # SCHEDULING
+  #
+  # systemd evaluates every calendar below in this explicit timezone, even if
+  # the host itself uses UTC or another local timezone.
+  timezone: Europe/London
+  # false: a job missed while the host was off remains missed.
+  # true: systemd runs one catch-up job after the host starts again.
+  # false prevents a missed 00:00 activation from being replayed after boot.
+  # A job can still start later if it was activated on time but waits for a
+  # previous local operation to release the host lock.
+  persistent_timers: false
+
+  # These are systemd OnCalendar expressions, not five-field cron strings.
+  # Format used here: optional weekday, date wildcard, and HH:MM:SS.
+  jobs:
+    backup:
+      # Every day at midnight.
+      calendar: "*-*-* 00:00:00"
+      description: daily backup
+    prune:
+      # Weekly maintenance after the midnight backup has normally completed.
+      calendar: "Sun *-*-* 03:30:00"
+      description: weekly retention and prune
+    check:
+      # Integrity verification runs after the weekly prune window.
+      calendar: "Sun *-*-* 08:30:00"
+      description: weekly repository check
+
+  # RETENTION POLICY
+  #
+  # A snapshot is retained when it matches ANY rule below. The rules overlap,
+  # so these numbers must not be added together to estimate snapshot count.
+  # Restic deduplicates content; snapshots do not each store a full data copy.
+  retention:
+    # Keep every snapshot made within one day of the newest snapshot.
+    keep_within: 1d
+    # Keep one representative snapshot for each of the latest 14 backup days.
+    keep_daily: 14
+    # Keep one representative snapshot for each of the latest 8 backup weeks.
+    keep_weekly: 8
+    # Keep one representative snapshot for each of the latest 12 months.
+    keep_monthly: 12
+    # Keep one representative snapshot for each of the latest 3 years.
+    keep_yearly: 3
+
+  # REPOSITORY INTEGRITY
+  #
+  # Every check validates all metadata. This setting also downloads and checks
+  # a random 10% sample of encrypted data packs to balance assurance and S3
+  # bandwidth. Use --read-data manually for a full check.
+  check_read_data_subset: "10%"
+
+  # If another Restic process has the repository locked, wait this long before
+  # failing. The host-level flock separately serializes locally launched jobs.
+  retry_lock: 30m
+
+# SECURITY AND OPERATIONS NOTES
+# - Define and encrypt every vault.services.nfs_backup.* variable.
 # - S3 credentials should be scoped to minimum required permissions:
 #   s3:ListBucket, s3:PutObject, s3:GetObject, s3:DeleteObject
-# - Store a secure offline copy of encryption_key — there is NO recovery if it is lost.
+# - Store an offline copy of encryption_key; there is no recovery if it is lost.

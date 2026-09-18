@@ -1,0 +1,86 @@
+---
+- name: Remove legacy Paperless Swarm services before deployment
+  ansible.builtin.include_role:
+    name: remove_legacy_swarm_services
+  vars:
+    remove_legacy_swarm_services_list:
+      - paperless_paperless
+      - paperless_paperless-broker
+      - paperless_paperless-tika
+      - paperless_paperless-gotenberg
+
+- name: Remove existing Paperless containers before deployment
+  community.docker.docker_container:
+    name: "{{ item }}"
+    state: absent
+    keep_volumes: true
+    stop_timeout: 30
+  loop:
+    - paperless
+    - paperless-gotenberg
+    - paperless-tika
+    - paperless-redis
+    - paperless-postgres
+  loop_control:
+    label: "{{ item }}"
+
+- name: Create and start Paperless containers
+  community.docker.docker_compose_v2:
+    project_src: "{{ paperless.compose_dir }}"
+    project_name: paperless
+    state: present
+    pull: never
+    recreate: always
+    remove_orphans: true
+    wait: true
+    wait_timeout: 300
+  register: paperless_compose
+
+- name: Verify every Paperless service is running
+  ansible.builtin.assert:
+    that:
+      - >-
+        paperless_expected_services
+        | difference(paperless_actual_services)
+        | length == 0
+      - paperless_non_running_services | length == 0
+    fail_msg: >-
+      Compose did not start every Paperless service. Missing:
+      {{ paperless_expected_services | difference(paperless_actual_services) }};
+      not running: {{ paperless_non_running_services }}
+  vars:
+    paperless_expected_services:
+      - paperless
+      - paperless-broker
+      - paperless-database
+      - paperless-gotenberg
+      - paperless-tika
+    paperless_actual_services: >-
+      {{ paperless_compose.containers
+         | map(attribute='Service') | unique | list }}
+    paperless_non_running_services: >-
+      {{ paperless_compose.containers
+         | rejectattr('State', 'equalto', 'running')
+         | map(attribute='Service') | unique | list }}
+  when: not ansible_check_mode
+
+- name: Wait for Paperless document conversion services
+  community.docker.docker_container_exec:
+    container: paperless
+    argv:
+      - python
+      - -c
+      - |-
+        import urllib.request
+        for url in (
+            "http://paperless-gotenberg:3000/health",
+            "http://paperless-tika:9998/tika",
+        ):
+            with urllib.request.urlopen(url, timeout=5):
+                pass
+  register: paperless_conversion_services
+  changed_when: false
+  retries: 30
+  delay: 2
+  until: (paperless_conversion_services.rc | default(1)) == 0
+  when: not ansible_check_mode

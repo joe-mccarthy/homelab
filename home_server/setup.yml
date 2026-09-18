@@ -1,0 +1,296 @@
+---
+- name: Validate home server target
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: Require a target host or address
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target | default('') | string | trim | length > 0
+        fail_msg: >-
+          Pass an inventory hostname, DNS name, or IP address with
+          -e target=<host-or-address>.
+
+    - name: Add target to the temporary bootstrap group
+      ansible.builtin.add_host:
+        name: "{{ target | string | trim }}"
+        groups: home_server_bootstrap
+
+- name: Bootstrap home server Python runtime
+  hosts: home_server_bootstrap
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Install Python required by Ansible modules
+      ansible.builtin.raw: >-
+        if test -x /usr/bin/python3; then echo python-present;
+        else apt-get update && apt-get install -y python3 &&
+        echo python-installed; fi
+      register: home_server_python_bootstrap
+      changed_when: "'python-installed' in home_server_python_bootstrap.stdout"
+
+- name: Prepare home server
+  hosts: home_server_bootstrap
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+
+  vars:
+    home_server_data_root: /exports/docker
+    home_server_compose_root: /opt
+    home_server_proxy_network: proxy
+    home_server_docker_repository_os: >-
+      {{ ansible_facts.distribution | lower }}
+    home_server_docker_repository_url: >-
+      https://download.docker.com/linux/{{ home_server_docker_repository_os }}
+    home_server_docker_registries: >-
+      {{ (vault | default({})).docker_registries | default([]) }}
+    home_server_docker_daemon_config:
+      log-driver: json-file
+      log-opts:
+        max-file: '3'
+        max-size: 10m
+      live-restore: true
+
+  pre_tasks:
+    - name: Require Docker registry vault configuration
+      ansible.builtin.assert:
+        that:
+          - vault is defined
+          - (vault | default({})).docker_registries is defined
+          - home_server_docker_registries is sequence
+          - home_server_docker_registries is not string
+        fail_msg: >-
+          Load a vault file containing vault.docker_registries with
+          --extra-vars @vault.yml.
+
+    - name: Require a supported operating system
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.os_family == 'Debian'
+          - ansible_facts.distribution in ['Debian', 'Ubuntu']
+        fail_msg: This playbook supports Debian and Ubuntu hosts only.
+
+  tasks:
+    - name: Install host and repository prerequisites
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - git
+          - gnupg
+          - python3-docker
+          - python3-requests
+          - python3-yaml
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Create APT keyring directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Install Docker repository signing key
+      ansible.builtin.get_url:
+        url: "{{ home_server_docker_repository_url }}/gpg"
+        dest: /etc/apt/keyrings/docker.asc
+        owner: root
+        group: root
+        mode: '0644'
+        force: true
+
+    - name: Read Debian package architecture
+      ansible.builtin.command:
+        argv:
+          - dpkg
+          - --print-architecture
+      register: home_server_deb_architecture
+      changed_when: false
+
+    - name: Configure Docker repository
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [arch={{ home_server_deb_architecture.stdout }}
+          signed-by=/etc/apt/keyrings/docker.asc]
+          {{ home_server_docker_repository_url }}
+          {{ ansible_facts.distribution_release }} stable
+        filename: docker
+        state: present
+        update_cache: true
+
+    - name: Remove packages that conflict with Docker CE
+      ansible.builtin.apt:
+        name:
+          - containerd
+          - docker-compose
+          - docker-compose-v2
+          - docker.io
+          - podman-docker
+          - runc
+        state: absent
+
+    - name: Install Docker Engine and Compose
+      ansible.builtin.apt:
+        name:
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-ce
+          - docker-ce-cli
+          - docker-compose-plugin
+        state: present
+
+    - name: Create Docker configuration directory
+      ansible.builtin.file:
+        path: /etc/docker
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Configure Docker daemon
+      ansible.builtin.copy:
+        content: "{{ home_server_docker_daemon_config | to_nice_json }}\n"
+        dest: /etc/docker/daemon.json
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart Docker
+
+    - name: Enable Docker service
+      ansible.builtin.systemd_service:
+        name: docker
+        enabled: true
+        state: started
+
+    - name: Add connection user to Docker group
+      ansible.builtin.user:
+        name: "{{ ansible_user | default(ansible_user_id) }}"
+        groups: docker
+        append: true
+      when:
+        - (ansible_user | default(ansible_user_id)) != 'root'
+
+    - name: Create deployment storage roots
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "{{ item.mode }}"
+      loop:
+        - path: "{{ home_server_data_root }}"
+          mode: '0755'
+        - path: "{{ home_server_compose_root }}"
+          mode: '0755'
+
+    - name: Apply Docker configuration before verification
+      ansible.builtin.meta: flush_handlers
+
+    - name: Validate Docker registry credentials
+      ansible.builtin.assert:
+        that:
+          - item.registry_url | default('') | string | trim | length > 0
+          - item.username | default('') | string | trim | length > 0
+          - item.password | default('') | string | length > 0
+        fail_msg: >-
+          Every vault.docker_registries entry must define a non-empty
+          registry_url, username, and password.
+      loop: "{{ home_server_docker_registries }}"
+      no_log: true
+
+    - name: Log in to Docker registries
+      community.docker.docker_login:
+        registry_url: "{{ item.registry_url }}"
+        username: "{{ item.username }}"
+        password: "{{ item.password }}"
+        state: present
+      loop: "{{ home_server_docker_registries }}"
+      no_log: true
+
+    - name: Inspect the shared reverse proxy network
+      community.docker.docker_network_info:
+        name: "{{ home_server_proxy_network }}"
+      register: home_server_proxy_network_info
+
+    - name: Inspect Docker runtime mode
+      ansible.builtin.command:
+        argv:
+          - docker
+          - info
+          - --format
+          - json
+      register: home_server_docker_info
+      changed_when: false
+
+    - name: Record whether Docker Swarm is active
+      ansible.builtin.set_fact:
+        home_server_swarm_active: >-
+          {{ (home_server_docker_info.stdout | from_json).Swarm.LocalNodeState
+             == 'active' }}
+
+    - name: Require a manager for a Swarm migration target
+      ansible.builtin.assert:
+        that:
+          - >-
+            not home_server_swarm_active
+            or (home_server_docker_info.stdout | from_json).Swarm.ControlAvailable
+        fail_msg: >-
+          Compose migration on a Swarm-active host requires a manager so legacy
+          services and Traefik's Swarm provider remain manageable.
+
+    - name: Require a compatible existing proxy network
+      ansible.builtin.assert:
+        that:
+          - >-
+            not home_server_proxy_network_info.exists
+            or (
+              home_server_swarm_active
+              and home_server_proxy_network_info.network.Scope == 'swarm'
+              and home_server_proxy_network_info.network.Driver == 'overlay'
+              and home_server_proxy_network_info.network.Attachable
+            )
+            or (
+              not home_server_swarm_active
+              and home_server_proxy_network_info.network.Scope == 'local'
+              and home_server_proxy_network_info.network.Driver == 'bridge'
+            )
+        fail_msg: >-
+          {{ home_server_proxy_network }} must be an attachable overlay on a
+          Swarm manager or a local bridge when Swarm is inactive. Recreate an
+          incompatible network during a maintenance window.
+
+    - name: Create shared reverse proxy network when absent
+      community.docker.docker_network:
+        name: "{{ home_server_proxy_network }}"
+        driver: "{{ home_server_swarm_active | ternary('overlay', 'bridge') }}"
+        attachable: "{{ home_server_swarm_active }}"
+        state: present
+      when: not home_server_proxy_network_info.exists
+
+    - name: Verify Docker Engine
+      ansible.builtin.command:
+        argv:
+          - docker
+          - info
+      changed_when: false
+
+    - name: Verify Docker Compose plugin
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - version
+      changed_when: false
+
+  handlers:
+    - name: Restart Docker
+      ansible.builtin.systemd_service:
+        name: docker
+        state: restarted

@@ -1,0 +1,11 @@
+---
+- name: Create DDNS Compose project directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0700'
+    owner: root
+    group: root
+  loop:
+    - "{{ ddns.compose_dir }}"
+    - "{{ ddns.compose_dir }}/secrets"

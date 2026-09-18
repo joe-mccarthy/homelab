@@ -1,27 +1,30 @@
 ---
-# This playbook is responsible for deploying the DDNS (Dynamic DNS) stack to the Docker Swarm cluster.
-# It targets the manager group and uses the `deploy` role to perform the deployment.
-# The `deploy` role ensures that Docker and docker-compose are installed, the required directory structure is created,
-# the stack is deployed, and any temporary files are cleaned up.
+- name: Validate DDNS target
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: Require a DDNS target
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target | default('') | string | trim | length > 0
+        fail_msg: >-
+          Pass an inventory hostname, DNS name, or IP address with
+          -e target=<host-or-address>.
+
+    - name: Add DDNS target to the temporary deployment group
+      ansible.builtin.add_host:
+        name: "{{ target | string | trim }}"
+        groups: deployment_target
 
 - name: Deploy DDNS
-  hosts: manager  # Target the manager group instead of hard-coding a specific index.
-  order: shuffle  # Select a manager without always preferring the first inventory host.
-  become: true  # Execute tasks with elevated privileges (sudo) to ensure proper permissions.
-  vars:
-    # Use one selected manager host for deployment to avoid `run_once` strategy caveats.
-    ddns_deploy_host: "{{ ansible_play_hosts_all | first }}"
-  tasks:
-    - name: Deploy DDNS stack
-      ansible.builtin.include_role:
-        name: deploy
-      when: inventory_hostname == ddns_deploy_host
+  hosts: deployment_target
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
 
-# Notes:
-# - Ensure that the `manager` group is properly defined in the Ansible inventory file, with at least one manager node.
-# - The `deploy` role should include all necessary tasks to prepare the environment, deploy the stack, and clean up.
-# - This playbook assumes that the Docker Swarm cluster is already initialized and functional.
-# - Always test the deployment in a staging environment before applying it to production.
-# - Use `become: true` cautiously and ensure that the user running the playbook has the necessary sudo privileges.
-# - The `deploy` role should be modular and reusable for similar deployments in other environments.
-# - Tasks run only on the first host selected for the play, ensuring a single-manager deployment.
+  tasks:
+    - name: Run staged DDNS deployment
+      ansible.builtin.include_role:
+        name: ddns

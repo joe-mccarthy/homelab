@@ -1,24 +1,34 @@
 ---
-# Group variables used by the Paperless deployment playbooks.
-#
-# These values primarily source sensitive information from an Ansible Vault
-# variable file (`vault_paperless`). This keeps secrets out of version control.
-#
-# The naming here matches the variables expected by the role that renders
-# `docker-compose.yaml` (so the Play uses them directly).
-
 paperless:
-  volumes:
-    paperless:
-      media: "{{ vault.services.paperless.volumes.paperless.media }}"
-      data: "{{ vault.services.paperless.volumes.paperless.data }}"
-      consume: "{{ vault.services.paperless.volumes.paperless.consume }}"
-      export: "{{ vault.services.paperless.volumes.paperless.export }}"
-    broker: "{{ vault.services.paperless.volumes.broker }}"
+  # Single-host paths and Docker network
+  data_dir: /exports/docker/paperless
+  compose_dir: /opt/paperless
+  proxy_network: proxy
+  allow_fresh_install: "{{ paperless_allow_fresh_install | default(false) }}"
+  sqlite_migration: "{{ paperless_sqlite_migration | default(false) }}"
+
+  # Stable application and database credentials (from Ansible Vault)
+  secret_key: "{{ vault.services.paperless.secret_key }}"
+  database:
+    data_dir: /exports/docker/paperless/database
+    major_version: '18'
+    name: paperless
+    user: paperless
+    password: "{{ vault.services.paperless.database_password }}"
+
+  # Container user used by the Paperless image
+  uid: '1000'
+  gid: '1000'
 
   # Pinned image tags for reproducible deployments
   versions:
-    broker: "8.6.1"
-    app: "2.20.13"
-    gotenberg: "8.28.0"
-    tika: "3.2.3.0"
+    broker: "8.10.1"
+    app: "3.1.0"
+    database: "18.6-bookworm"
+    gotenberg: "8.36.0"
+    tika: "3.3.1.0"
+
+# Notes:
+# - The play targets the host passed with -e target=<host-or-address>.
+# - data_dir is local to that host; it does not need to be an NFS mount.
+# - Keep secret_key stable after the first deployment.

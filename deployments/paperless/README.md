@@ -49,28 +49,9 @@ The legacy floating `redis:8` image can write RDB format 14. Redis versions befo
 
 The play requires an initialized PostgreSQL 18 cluster under `/exports/docker/paperless/database` and the existing `data` and `media` directories. It verifies the cluster's `PG_VERSION` marker before replacing containers, preventing an incorrect path from silently creating an empty database.
 
-Older Paperless installations used SQLite at
-`/exports/docker/paperless/data/db.sqlite3`. Do not use
-`paperless_allow_fresh_install=true` while that database is still present. The
-role refuses the cutover until the following migration is complete:
-
-1. Back up the complete `/exports/docker/paperless` tree.
-2. While the legacy Paperless service is running, use its
-   `document_exporter ../export` command to create an export in the persistent
-   `/usr/src/paperless/export` mount.
-3. Verify the export completed successfully and contains `manifest.json`.
-4. Stop the legacy Paperless service and archive `data/db.sqlite3` outside
-   `/exports/docker/paperless`; do not delete the backup.
-5. Run this deployment once with both `paperless_allow_fresh_install=true` and
-   `paperless_sqlite_migration=true`. The latter flag requires the persistent
-   export manifest before PostgreSQL can be initialized.
-6. Run `docker exec paperless document_importer ../export`, then verify users,
-   documents, tags, correspondents, and document counts before retiring the
-   SQLite backup.
-
-Use both flags only for the first deployment that initializes PostgreSQL from
-the SQLite export. Retain the export as a backup, but omit both flags on later
-deployments; an initialized PostgreSQL cluster takes precedence over it.
+Normal deployments use the existing PostgreSQL database. For a new installation,
+add `-e paperless_allow_fresh_install=true` to the first run to initialize the
+database and application directories. Omit that option on subsequent runs.
 
 The Compose settings retain automatic OCR, archive generation, and duplicate rejection. Tika remains on the latest release pinned by Paperless upstream because Tika 4 is not yet the supported conversion image.
 

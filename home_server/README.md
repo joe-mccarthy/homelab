@@ -1,8 +1,8 @@
 # Home Server Bootstrap
 
 This playbook prepares one Debian or Ubuntu host for the Home Assistant,
-Traefik, Paperless, Immich, and DDNS Docker Compose deployments. The host can be
-an inventory alias, DNS name, or IP address.
+Traefik, Paperless, Immich, DDNS, and Omni Tools Docker Compose deployments. The
+host can be an inventory alias, DNS name, or IP address.
 
 It installs Docker Engine and the Compose plugin from Docker's official APT
 repository, enables bounded container logs, adds the Ansible connection user to
@@ -23,7 +23,7 @@ with migration guidance rather than replacing a non-attachable overlay.
 - Create and encrypt `vault.yml` with a `vault.docker_registries` list based on
   [`vault.template.yml`](../vault.template.yml).
 
-The five service deployment playbooks accept the same `-e target=...` value, so
+The six service deployment playbooks accept the same `-e target=...` value, so
 the host does not need to belong to a particular inventory group.
 
 ## Usage
@@ -73,6 +73,8 @@ dependency order:
 ansible-playbook -i inventory.yml deployments/traefik/deploy.yml -e target=odin \
   --extra-vars @vault.yml --ask-vault-pass
 ansible-playbook -i inventory.yml deployments/ddns/deploy.yml -e target=odin \
+  --extra-vars @vault.yml --ask-vault-pass
+ansible-playbook -i inventory.yml deployments/omni/deploy.yml -e target=odin \
   --extra-vars @vault.yml --ask-vault-pass
 ansible-playbook -i inventory.yml deployments/home-assistant/deploy.yml -e target=odin \
   --extra-vars @vault.yml --ask-vault-pass

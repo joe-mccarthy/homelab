@@ -1,0 +1,29 @@
+---
+- name: Remove the existing Omni Tools container before deployment
+  community.docker.docker_container:
+    name: omni-tools
+    state: absent
+    keep_volumes: true
+    stop_timeout: 30
+
+- name: Create and start Omni Tools container
+  community.docker.docker_compose_v2:
+    project_src: "{{ omni.compose_dir }}"
+    project_name: omni
+    state: present
+    pull: never
+    recreate: always
+    remove_orphans: true
+    wait: true
+    wait_timeout: 60
+  register: omni_compose
+
+- name: Verify Omni Tools is running
+  ansible.builtin.assert:
+    that:
+      - "'omni' in omni_compose.containers | map(attribute='Service')"
+      - >-
+        (omni_compose.containers
+         | rejectattr('State', 'equalto', 'running') | list | length) == 0
+    fail_msg: Docker Compose did not leave the Omni Tools service running
+  when: not ansible_check_mode

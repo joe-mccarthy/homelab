@@ -1,0 +1,11 @@
+---
+- name: Validate required Omni Tools configuration
+  ansible.builtin.assert:
+    that:
+      - omni.compose_dir | length > 1
+      - omni.compose_dir is match('^/')
+      - omni.proxy_network | string | trim | length > 0
+      - vault.shared.general.domain | default('') | string | trim | length > 0
+    fail_msg: >-
+      Omni Tools requires an absolute Compose project path, a proxy network,
+      and vault.shared.general.domain.

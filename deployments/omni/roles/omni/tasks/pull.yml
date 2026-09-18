@@ -1,0 +1,6 @@
+---
+- name: Pull Omni Tools image
+  community.docker.docker_compose_v2_pull:
+    project_src: "{{ omni.compose_dir }}"
+    project_name: omni
+    policy: always

@@ -2,7 +2,7 @@
 
 [![ansible-lint](https://img.shields.io/github/actions/workflow/status/joe-mccarthy/homelab/ansible-linter.yml?style=flat-square&label=ansible%20lint)](https://github.com/joe-mccarthy/homelab/actions/workflows/ansible-linter.yml) [![Ansible](https://img.shields.io/badge/Ansible-Automation-EE0000?logo=ansible&logoColor=white&style=flat-square)](https://docs.ansible.com/) [![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white&style=flat-square)](https://docs.docker.com/compose/) [![Docker Swarm](https://img.shields.io/badge/Docker%20Swarm-Legacy-2496ED?logo=docker&logoColor=white&style=flat-square)](https://docs.docker.com/engine/swarm/) [![Traefik](https://img.shields.io/badge/Traefik-Reverse%20Proxy-24A1C1?logo=traefikproxy&logoColor=white&style=flat-square)](https://doc.traefik.io/traefik/)
 
-The `deployments` directory contains standalone Ansible playbooks for services in the home lab. Newer deployments run with Docker Compose on the single `nfs_servers` host; legacy deployments still use Docker Swarm. Web applications rely on [Traefik](traefik/README.md), while background services such as DDNS do not.
+The `deployments` directory contains standalone Ansible playbooks for services in the home lab. Newer deployments run with Docker Compose on a single target host; legacy deployments still use Docker Swarm. Web applications rely on [Traefik](traefik/README.md), while background services such as DDNS do not.
 
 ## Overview
 
@@ -77,7 +77,7 @@ Single-host Compose deployments retain root-owned projects beneath `/opt/<servic
 ### 10. [Omni Tools](omni/README.md)
 - **Description**: Deploys Omni Tools, a self-hosted browser-based collection of everyday utility tools. It provides a lightweight, privacy-friendly alternative to scattered online services.
 - **Use Case**: Ideal for users who want a single, self-hosted destination for common utility tasks without relying on third-party websites.
-- **Dependencies**: Requires Traefik for proxying and certificate management.
+- **Dependencies**: Runs with Docker Compose on the target host and requires a local Traefik container on the external `proxy` bridge network.
 
 ### 11. [Personal Blog](blog/README.md)
 - **Description**: Deploys multiple instances of a private Docker image for a personal blog. This deployment demonstrates how to handle private registries and update services when new image versions become available.
@@ -116,14 +116,14 @@ Single-host Compose deployments retain root-owned projects beneath `/opt/<servic
 | [Paperless](paperless/README.md) | tika | `3.3.1.0` |
 | [Portainer](portainer/README.md) | portainer-ce | `2.39.1` |
 | [Portainer](portainer/README.md) | portainer-agent | `2.39.1` |
-| [Omni Tools](omni/README.md) | omni-tools | `latest` |
+| [Omni Tools](omni/README.md) | omni-tools | `0.6.0` |
 | [Traefik](traefik/README.md) | traefik | `3.7.12` |
 
 ## Prerequisites
 
 Before deploying any services, ensure the following:
 1. **Docker Runtime**:
-   - Compose deployments require exactly one host in `nfs_servers` with Docker Engine and the Compose v2 plugin.
+   - Compose deployments require a target host with Docker Engine and the Compose v2 plugin, selected with `-e target=<host-or-address>`.
    - Legacy Swarm deployments still require an initialized cluster and a manager node.
 
 2. **Traefik Deployment**:

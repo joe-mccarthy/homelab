@@ -19,7 +19,7 @@ services:
       - "--api.dashboard={{ (traefik.dashboard.enabled | bool) | ternary('true', 'false') }}"
       - --api.debug=false
 
-      - --log.level=DEBUG
+      - --log.level=INFO
       - --log.filepath=/logs/traefik.log
 
       - --entrypoints.web.address=:80

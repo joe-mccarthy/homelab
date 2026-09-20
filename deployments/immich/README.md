@@ -11,7 +11,9 @@ An Ansible-managed, single-host Docker Compose deployment of Immich, PostgreSQL,
 | `immich-server` | `ghcr.io/immich-app/immich-server:v3.1.0` | Web application, API, and background jobs. |
 | `immich-machine-learning` | `ghcr.io/immich-app/immich-machine-learning:v3.1.0` | Face recognition and smart search. |
 | `immich-redis` | `valkey/valkey:9` pinned by digest | Cache and job coordination. |
-| `immich-database` | Immich PostgreSQL 14 image pinned by digest | Metadata and vector search database. |
+| `immich-database` | `ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0` pinned by digest | Metadata and vector search database. |
+
+The complete database and Valkey image tags and digests are in [`group_vars/all.yml`](group_vars/all.yml).
 
 All containers run on the host passed through `-e target=...` using Docker
 Compose. The private project network and external proxy bridge are local to
@@ -39,7 +41,7 @@ machine learning traffic remains on the private Compose project network.
 - Docker Engine and the Docker Compose v2 plugin on that host.
 - The `community.docker` collection from [`requirements.yml`](../../requirements.yml).
 - `/exports/docker` on local storage, or `immich.data_dir` changed to another local path.
-- The machine bootstrap's external `proxy` network.
+- The [home-server bootstrap's](../../home_server/README.md#bootstrap) external local `proxy` bridge.
 - A local Traefik container attached to that bridge.
 - DNS for `immich.<domain>` directed to Traefik.
 - At least 6 GB RAM; 8 GB and four CPU cores are recommended.
@@ -49,18 +51,20 @@ PostgreSQL must not run on NFS. The play checks the database filesystem against 
 
 ## Existing Data
 
-The former template mounted the host upload directory at `/usr/src/app/upload`, while this project uses Immich's current `/data` mount.
+Routine deployments reuse the media, automatic backups, and PostgreSQL data at the paths listed above. The upload directory is mounted at `/data` in the server container, with database backups mounted at `/data/backups`.
 
-Immich v3 supports direct upgrades from this deployment's former v2.7.5 pin. The database already uses VectorChord, as required by v3. Create and test a native PostgreSQL backup before the first v3 deployment.
+The play requires `database/PG_VERSION` and these six media markers beneath `immich.data_dir`:
 
-Before the first Compose start:
+```text
+upload/upload/.immich
+upload/library/.immich
+upload/thumbs/.immich
+upload/encoded-video/.immich
+upload/profile/.immich
+backups/.immich
+```
 
-1. Place the existing media tree under `/exports/docker/immich/upload`.
-2. Place automatic backups under `/exports/docker/immich/backups`.
-3. Place the PostgreSQL cluster under `/exports/docker/immich/database`.
-4. Create and test a native PostgreSQL backup.
-
-The play requires the existing PostgreSQL `PG_VERSION` file and all six Immich `.immich` media markers before deployment. These checks prevent a wrong path from becoming a fresh, empty installation.
+These checks prevent a wrong path from becoming a fresh, empty installation. Review upstream upgrade instructions and create a native PostgreSQL backup before changing image versions.
 
 ## Configuration
 
@@ -87,16 +91,15 @@ For an intentional new installation, add `--extra-vars immich_allow_fresh_instal
 
 ## Deploy
 
-Run from the repository root. Include `--extra-vars @vault.yml` when the vault is not already loaded by inventory:
+Run from the repository root, replacing the example address and SSH user:
 
 ```bash
-ansible-playbook \
-  -i inventory.yml \
-  deployments/immich/deploy.yml \
-  -e target=odin \
-  --extra-vars @vault.yml \
-  --ask-vault-pass
+ansible-playbook deployments/immich/deploy.yml \
+  -e target=192.168.1.50 -u pi \
+  --extra-vars @vault.yml --ask-vault-pass --ask-become-pass
 ```
+
+For a new installation, append `-e immich_allow_fresh_install=true` to this command. For inventory aliases or passwordless sudo, see the [command conventions](../../home_server/README.md#command-conventions).
 
 The role validates the project, pulls images, starts Compose without a second registry request, waits for health checks, and fails unless all four services are running.
 
@@ -104,11 +107,11 @@ Immediately before startup, the role stops and removes every container using Imm
 
 | Stage | Task file | Responsibility |
 | --- | --- | --- |
-| Validate | `validate.yml` | Guard existing data and database credentials. |
-| Filesystem | `filesystem.yml` | Create data and Compose directories and require local database storage. |
-| Prepare | `prepare.yml` | Prepare Docker, secrets, and the validated Compose project. |
-| Pull | `pull.yml` | Pull each project image sequentially. |
-| Deploy | `deploy.yml` | Replace, start, and verify the Immich containers. |
+| Validate | [`validate.yml`](roles/immich/tasks/validate.yml) | Guard existing data and database credentials. |
+| Filesystem | [`filesystem.yml`](roles/immich/tasks/filesystem.yml) | Create data and Compose directories and require local database storage. |
+| Prepare | [`prepare.yml`](roles/immich/tasks/prepare.yml) | Prepare Docker, secrets, and the validated Compose project. |
+| Pull | [`pull.yml`](roles/immich/tasks/pull.yml) | Pull each missing project image sequentially. |
+| Deploy | [`deploy.yml`](roles/immich/tasks/deploy.yml) | Replace, start, and verify the Immich containers. |
 
 ## Operations
 
@@ -119,7 +122,7 @@ sudo docker compose --project-directory /opt/immich restart immich-server
 sudo docker compose --project-directory /opt/immich config --quiet
 ```
 
-After migration, verify login, library counts, a new mobile upload, thumbnail generation, smart search, and creation of a new database backup.
+After deployment, verify login, library counts, a new mobile upload, thumbnail generation, smart search, and creation of a new database backup.
 
 Redeploy after changing variables or templates by rerunning Ansible. Do not edit `/opt/immich/compose.yaml` directly because Ansible replaces it.
 

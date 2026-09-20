@@ -26,7 +26,7 @@ body:
       label: "Area"
       description: "Which part of the homelab is affected?"
       options:
-        - "Home server setup"
+        - "Home server setup or operations"
         - "Deployment"
         - "Maintenance"
         - "Inventory or vault"
@@ -49,7 +49,7 @@ body:
       label: "Steps to reproduce"
       description: "How can the issue be reproduced?"
       placeholder: |
-        1. Run `ansible-playbook -i inventory.yml ...`
+        1. Run `ansible-playbook deployments/traefik/deploy.yml -e target=<host-or-address> ...`
         2. Observe ...
     validations:
       required: true
@@ -80,7 +80,8 @@ body:
         - OS:
         - Ansible version:
         - Docker version:
-        - Target node type:
+        - Docker Compose version:
+        - Target host OS/architecture:
 
   - type: textarea
     id: extra

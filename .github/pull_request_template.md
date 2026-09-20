@@ -24,7 +24,7 @@ ansible-lint
 
 - [ ] No secrets, tokens, private keys, or sensitive values are committed
 - [ ] New secret values are documented in `vault.template.yml`
-- [ ] New inventory assumptions are documented
+- [ ] Target selection and any inventory requirements are documented
 - [ ] Public exposure, ports, and Traefik routing have been reviewed
 
 ## 🛠️ Operational Notes

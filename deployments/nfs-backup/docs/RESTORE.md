@@ -1,6 +1,6 @@
 # Restore Runbook
 
-This runbook explains how to recover files from the NFS Restic repository. It is written for both routine tests and real incidents.
+This runbook explains how to recover local application files from the NFS Backup Restic repository. It is written for both routine tests and real incidents. Run the host commands on the backup or recovery host; the deployment name does not imply that NFS exports are required.
 
 ## The Most Important Rule
 
@@ -12,8 +12,8 @@ Do not point Restic directly at `/exports/docker` during the first recovery atte
 
 Manual commands use:
 
-```bash
-sudo nfs-backup-job restic <restic arguments>
+```text
+sudo nfs-backup-job restic <command> [options...]
 ```
 
 The runner provides the container with:
@@ -51,7 +51,7 @@ Always inspect the resulting directory tree instead of assuming the restored fil
 | --- | --- |
 | Single file | A configuration file was deleted or edited incorrectly. |
 | Single directory | One application's data needs to be rolled back. |
-| Full snapshot | The NFS dataset or server was lost. |
+| Full snapshot | The application-data filesystem or host was lost. |
 | Comparison only | Determine when a file changed before choosing a snapshot. |
 | Test restore | Prove that backup data can be decrypted and reconstructed. |
 
@@ -63,21 +63,21 @@ Confirm:
 - `/restore` has enough free space
 - the Restic encryption key is available
 - S3 credentials can read the repository
-- the NFS server can reach the S3 endpoint
+- the backup or recovery host can reach the S3 endpoint
 - you know approximately what path and time you need
 - production applications will not read partially restored data
 
 Check free space:
 
 ```bash
-df -h /restore
+sudo df -h /restore
 ```
 
 Check whether another local runner job is active:
 
 ```bash
 systemctl status 'nfs-backup@*.service'
-docker ps --filter 'label=homelab.job'
+sudo docker ps --filter 'label=homelab.job'
 ```
 
 The runner waits for another local job, but confirming the current state avoids surprising delays.
@@ -123,6 +123,9 @@ The output includes:
 
 Record the full or short snapshot ID you intend to use.
 
+Replace the quoted `<snapshot-id>`, `<older-snapshot-id>`, and
+`<newer-snapshot-id>` placeholders below with actual IDs from this listing.
+
 Do not automatically choose the newest snapshot. If data was corrupted or deleted several days ago, the newest snapshot may already contain the bad state.
 
 ## Step 3: Inspect A Snapshot Without Restoring
@@ -130,7 +133,7 @@ Do not automatically choose the newest snapshot. If data was corrupted or delete
 List all files in a snapshot:
 
 ```bash
-sudo nfs-backup-job restic ls <snapshot-id>
+sudo nfs-backup-job restic ls '<snapshot-id>'
 ```
 
 List a specific directory recursively:
@@ -138,7 +141,7 @@ List a specific directory recursively:
 ```bash
 sudo nfs-backup-job restic ls \
   --recursive \
-  <snapshot-id> \
+  '<snapshot-id>' \
   /exports/docker/app
 ```
 
@@ -147,7 +150,7 @@ Show ownership, permissions, size, and modification time:
 ```bash
 sudo nfs-backup-job restic ls \
   --long \
-  <snapshot-id> \
+  '<snapshot-id>' \
   /exports/docker/app
 ```
 
@@ -172,7 +175,7 @@ Avoid deleting an earlier restore until it has been reviewed. If `/restore` alre
 ## Restore A Single File
 
 ```bash
-sudo nfs-backup-job restic restore <snapshot-id> \
+sudo nfs-backup-job restic restore '<snapshot-id>' \
   --include /exports/docker/app/config.yml \
   --target /restore/incident-YYYYMMDD
 ```
@@ -203,7 +206,7 @@ sudo diff -u \
 ## Restore A Directory
 
 ```bash
-sudo nfs-backup-job restic restore <snapshot-id> \
+sudo nfs-backup-job restic restore '<snapshot-id>' \
   --include /exports/docker/app \
   --target /restore/incident-YYYYMMDD
 ```
@@ -220,14 +223,14 @@ sudo ls -la /restore/incident-YYYYMMDD/exports/docker/app
 Estimate the required restore size first:
 
 ```bash
-sudo nfs-backup-job restic stats <snapshot-id>
-df -h /restore
+sudo nfs-backup-job restic stats '<snapshot-id>'
+sudo df -h /restore
 ```
 
 Restore:
 
 ```bash
-sudo nfs-backup-job restic restore <snapshot-id> \
+sudo nfs-backup-job restic restore '<snapshot-id>' \
   --target /restore/incident-YYYYMMDD
 ```
 
@@ -244,7 +247,7 @@ The manual runner writes to the current terminal. To preserve output, run it fro
 In another terminal, confirm the container is active:
 
 ```bash
-docker ps --filter 'label=homelab.job=nfs-backup-restic'
+sudo docker ps --filter 'label=homelab.job=nfs-backup-restic'
 ```
 
 The manual mode uses job label `nfs-backup-restic` because `restic` is the runner's selected job name.
@@ -324,7 +327,7 @@ Do not use a generic recursive copy command without first understanding ownershi
 To determine what changed between two backup points:
 
 ```bash
-sudo nfs-backup-job restic diff <older-snapshot-id> <newer-snapshot-id>
+sudo nfs-backup-job restic diff '<older-snapshot-id>' '<newer-snapshot-id>'
 ```
 
 Include metadata differences:
@@ -332,8 +335,8 @@ Include metadata differences:
 ```bash
 sudo nfs-backup-job restic diff \
   --metadata \
-  <older-snapshot-id> \
-  <newer-snapshot-id>
+  '<older-snapshot-id>' \
+  '<newer-snapshot-id>'
 ```
 
 This can help identify when deletion or corruption first appeared.
@@ -544,7 +547,7 @@ sudo docker run --rm \
   --mount type=bind,src=/var/cache/nfs-backup-recovery,dst=/root/.cache/restic \
   --mount type=bind,src=/restore,dst=/restore \
   mazzolino/restic:1.8.2 \
-  restore <snapshot-id> \
+  restore '<snapshot-id>' \
   --target /restore/disaster-YYYYMMDD
 ```
 
@@ -555,8 +558,10 @@ The recovered dataset is normally under:
 ```
 
 Validate files, ownership, databases, and application-level behavior before
-rebuilding NFS exports or applications from this copy. Keep the protected
-recovery configuration until recovery and verification are complete, then
+rebuilding applications from this copy. Recreate Compose projects and application
+secrets from the repository and your vault after placing the recovered data at
+the configured application paths. Keep the protected recovery configuration
+until recovery and verification are complete, then
 remove it using the host's approved secret-disposal process.
 
 ## Cleaning Up A Restore Workspace
@@ -590,7 +595,7 @@ sudo nfs-backup-job restic snapshots \
 Inspect exact paths stored in the snapshot:
 
 ```bash
-sudo nfs-backup-job restic ls <snapshot-id>
+sudo nfs-backup-job restic ls '<snapshot-id>'
 ```
 
 Use the absolute snapshot path beginning with `/exports/docker`.
@@ -604,8 +609,8 @@ The runner and restore container operate as root, and `/restore` is mode `0700`.
 Stop and free or add restore storage. Previous repository snapshots remain safe because the restore target is separate from S3.
 
 ```bash
-df -h /restore
-sudo du -sh /restore/*
+sudo df -h /restore
+sudo du -h --max-depth=1 /restore
 ```
 
 ### Wrong Password
@@ -617,7 +622,7 @@ Verify that the Vault value is the exact encryption key used to initialize the r
 Check for active jobs first:
 
 ```bash
-docker ps --filter 'label=homelab.job'
+sudo docker ps --filter 'label=homelab.job'
 systemctl status 'nfs-backup@*.service'
 sudo nfs-backup-job restic list locks
 ```

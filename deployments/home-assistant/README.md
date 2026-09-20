@@ -41,7 +41,7 @@ ws://<home-assistant-host>:5580/ws
 | [`templates/zigbee/configuration.yaml`](templates/zigbee/configuration.yaml) | Initial Zigbee2MQTT configuration. |
 | [`roles/home_assistant/tasks/main.yml`](roles/home_assistant/tasks/main.yml) | Runs the five deployment stages in order. |
 
-The rendered Compose project remains at `/opt/home-assistant/compose.yaml` so normal `docker compose` commands can manage it after deployment.
+The rendered Compose project remains at `/opt/home-assistant/compose.yaml`. Use `--project-name home_assistant` for manual Compose commands because the project name differs from the `home-assistant` directory name.
 
 ## Prerequisites
 
@@ -54,18 +54,19 @@ The rendered Compose project remains at `/opt/home-assistant/compose.yaml` so no
 - Working IPv6 and mDNS/multicast between this host and Matter devices.
 - Vault values defined from [`../../vault.template.yml`](../../vault.template.yml).
 
-The machine bootstrap creates the external `proxy` bridge on a standalone Docker host; this deployment requires it to exist before deployment.
+The [home-server bootstrap](../../home_server/README.md#bootstrap) creates the external local `proxy` bridge. Home Assistant, Zigbee2MQTT, and Traefik use this bridge on the same Docker host.
 
 ## Deploy
 
-Run from the repository root:
+Run from the repository root, replacing the example address and SSH user:
 
 ```bash
-ansible-playbook -i inventory.yml deployments/home-assistant/deploy.yml \
-  -e target=odin --extra-vars @vault.yml --ask-vault-pass
+ansible-playbook deployments/home-assistant/deploy.yml \
+  -e target=192.168.1.50 -u pi \
+  --extra-vars @vault.yml --ask-vault-pass --ask-become-pass
 ```
 
-Add `--ask-become-pass` if the remote user requires a sudo password.
+For inventory aliases or passwordless sudo, see the [command conventions](../../home_server/README.md#command-conventions). The vault is explicitly loaded by `--extra-vars @vault.yml`.
 
 The deployment uses one Home Assistant role with five ordered task files:
 
@@ -115,6 +116,8 @@ vault:
 | `vault.services.home_assistant.mqtt_server` | Zigbee2MQTT broker URL; normally `mqtt://mqtt:1883`. |
 | `vault.services.home_assistant.zigbee_serial_port` | Local device path or TCP coordinator URL used by Zigbee2MQTT. |
 
+Set `proxy` to the actual proxy bridge subnet or Traefik address; the CIDR above is an example. Inspect the network on the host with `sudo docker network inspect proxy`.
+
 The Home Assistant and Zigbee2MQTT configuration templates are initial defaults and are not overwritten after first creation. Edit `/exports/docker/home_assistant/configuration.yaml` directly if `trusted_proxies` needs the local bridge CIDR. If the MQTT URL or coordinator path changes, edit `/exports/docker/home_assistant/zigbee2mqtt/data/configuration.yaml` as well as updating the vault.
 
 ## Persistent Data
@@ -134,29 +137,35 @@ The default data root is `/exports/docker/home_assistant`:
 
 The initial Home Assistant and Zigbee2MQTT templates use `force: false`, so subsequent deployments preserve files changed by the applications or by hand.
 
-Matter.js Server runs as UID/GID `1000`. The deployment recursively applies that ownership to `matter-server/data`, including data migrated from Python Matter Server.
+Matter.js Server runs as UID/GID `1000`. The deployment recursively applies that ownership to `matter-server/data` after stopping the existing container.
 
 ## Operations
 
 Check all containers:
 
 ```bash
-sudo docker compose --project-directory /opt/home-assistant ps
+sudo docker compose --project-directory /opt/home-assistant \
+  --project-name home_assistant ps
 ```
 
 Follow logs:
 
 ```bash
-sudo docker compose --project-directory /opt/home-assistant logs -f
+sudo docker compose --project-directory /opt/home-assistant \
+  --project-name home_assistant logs -f
 ```
 
 Restart one service:
 
 ```bash
-sudo docker compose --project-directory /opt/home-assistant restart homeassistant
-sudo docker compose --project-directory /opt/home-assistant restart matter-server
-sudo docker compose --project-directory /opt/home-assistant restart zigbee2mqtt
-sudo docker compose --project-directory /opt/home-assistant restart mqtt
+sudo docker compose --project-directory /opt/home-assistant \
+  --project-name home_assistant restart homeassistant
+sudo docker compose --project-directory /opt/home-assistant \
+  --project-name home_assistant restart matter-server
+sudo docker compose --project-directory /opt/home-assistant \
+  --project-name home_assistant restart zigbee2mqtt
+sudo docker compose --project-directory /opt/home-assistant \
+  --project-name home_assistant restart mqtt
 ```
 
 Redeploy after changing variables or templates by rerunning the Ansible playbook. Every run removes the known containers and recreates all four services; persistent bind-mounted data remains intact. Do not edit the rendered Compose file because Ansible replaces it.
@@ -164,6 +173,8 @@ Redeploy after changing variables or templates by rerunning the Ansible playbook
 ## Zigbee
 
 For a local coordinator, use a stable `/dev/serial/by-id/...` path instead of `/dev/ttyUSB0`; Compose passes `/dev/...` values through as Docker devices. For a network coordinator, use its `tcp://host:port` URL. TCP coordinators are configured only in Zigbee2MQTT and are not added to Compose's `devices` list.
+
+The initial Zigbee2MQTT template selects the `zstack` adapter. Set `serial.adapter` in the persisted configuration to match your coordinator hardware when a different adapter is required.
 
 Pairing is disabled by default in the initial configuration. Enable it only while adding devices, then disable it again.
 
@@ -184,8 +195,8 @@ This setup supports Wi-Fi Matter devices. Thread devices additionally require a 
 | Symptom | Check |
 | --- | --- |
 | Only Matter Server starts | Inspect `proxy` with `docker network inspect proxy`; it must be a local bridge network. |
-| Deployment reports a missing service | Run `sudo docker compose --project-directory /opt/home-assistant ps --all` and inspect the failed service's logs. |
-| Home Assistant proxy errors | Update `vault.services.home_assistant.proxy` for the local proxy bridge CIDR. |
+| Deployment reports a missing service | Run `sudo docker compose --project-directory /opt/home-assistant --project-name home_assistant ps --all` and inspect the failed service's logs. |
+| Home Assistant proxy errors | Update `trusted_proxies` in the persisted `configuration.yaml` and `vault.services.home_assistant.proxy` to match the local proxy bridge, then recreate or restart Home Assistant. |
 | Zigbee2MQTT cannot open the coordinator | For local hardware, verify the device path and ownership. For TCP hardware, verify the host and port are reachable. |
 | Zigbee2MQTT cannot reach MQTT | Use `mqtt://mqtt:1883` and confirm both services are on the project default network. |
 | Home Assistant cannot connect to Matter | Confirm port `5580` is reachable at the host LAN address and Matter Server is healthy. |

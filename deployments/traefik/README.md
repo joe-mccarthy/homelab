@@ -2,7 +2,7 @@
 
 [![Ansible](https://img.shields.io/badge/Ansible-Automation-EE0000?logo=ansible&logoColor=white&style=flat-square)](https://docs.ansible.com/) [![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white&style=flat-square)](https://docs.docker.com/compose/) [![Let's Encrypt](https://img.shields.io/badge/Let's%20Encrypt-TLS-003A70?logo=letsencrypt&logoColor=white&style=flat-square)](https://letsencrypt.org/docs/) [![Cloudflare](https://img.shields.io/badge/Cloudflare-DNS%20Challenge-F38020?logo=cloudflare&logoColor=white&style=flat-square)](https://developers.cloudflare.com/dns/) ![Traefik](https://img.shields.io/badge/Traefik-v3.7.12-5C5C5C?style=flat-square)
 
-An Ansible-managed, single-host Docker Compose deployment of Traefik. It discovers local containers through the Docker provider, routes HTTP, HTTPS, and SSH traffic, and obtains wildcard certificates with a Cloudflare DNS-01 challenge.
+An Ansible-managed, single-host Docker Compose deployment of Traefik. It discovers local containers through the Docker provider, routes HTTP and HTTPS traffic, and obtains wildcard certificates with a Cloudflare DNS-01 challenge. An additional `ssh` entrypoint is available for separately configured TCP routers.
 
 ## Runtime Model
 
@@ -27,14 +27,15 @@ The external `proxy` network must already exist as a local bridge. [`home_server
 
 ## Deploy
 
-Run from the repository root:
+Run from the repository root, replacing the example address and SSH user:
 
 ```bash
-ansible-playbook -i inventory.yml deployments/traefik/deploy.yml \
-  -e target=odin --extra-vars @vault.yml --ask-vault-pass
+ansible-playbook deployments/traefik/deploy.yml \
+  -e target=192.168.1.50 -u pi \
+  --extra-vars @vault.yml --ask-vault-pass --ask-become-pass
 ```
 
-Add `--ask-become-pass` if the remote user requires a sudo password.
+For inventory aliases or passwordless sudo, see the [command conventions](../../home_server/README.md#command-conventions). The vault is explicitly loaded by `--extra-vars @vault.yml`.
 
 The deployment uses one Traefik role with five ordered task files:
 
@@ -74,9 +75,11 @@ vault:
 
 Cloudflare values are mounted as Compose secrets at `/run/secrets/cf_email` and `/run/secrets/cf_token`; they are not embedded in the rendered Compose file or container environment.
 
+The ACME registration email in the template is `admin@<domain>`, derived from `vault.shared.general.domain`. The published port defaults are `80`, `443`, and `2222`; the `ssh` entrypoint requires a TCP router and backend to carry application traffic.
+
 Every playbook run recreates the Traefik container, so file-backed credential changes are always picked up immediately.
 
-The dashboard is available at `https://traefik.<domain>` when enabled. It is not published on port `8080`, and both HTTP and HTTPS dashboard routes enforce the configured source-range allowlist.
+The dashboard is available at `https://traefik.<domain>` when enabled. Its HTTPS router enforces the configured source-range allowlist. HTTP requests are redirected to HTTPS at the `web` entrypoint, and port `8080` is not published.
 
 ## Persistent Files
 

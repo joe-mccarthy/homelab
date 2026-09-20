@@ -2,12 +2,17 @@
 
 This guide provides a safe diagnostic sequence for the NFS backup deployment.
 
+The backup runs on local application data on the single `nfs_servers` inventory
+host. The name is retained by the playbook and systemd units; an NFS export is
+not a prerequisite. Run host commands below on that machine. Deployment commands
+run from the repository root on the Ansible controller.
+
 ## First Principle: No Container Is Normally Running
 
 Between jobs, this is expected:
 
 ```bash
-docker ps --filter 'label=homelab.job'
+sudo docker ps --quiet --filter 'label=homelab.job'
 ```
 
 Expected output: no matching containers.
@@ -30,14 +35,21 @@ Start with read-only inspection.
 
 ## Quick Diagnostic Sequence
 
-Run on the NFS server:
+For an overview from the controller, run the [host status playbook](../../../home_server/status.yml):
+
+```bash
+ansible-playbook home_server/status.yml \
+  -e target=192.168.1.50 -u pi --ask-become-pass
+```
+
+For backup-specific diagnosis, run on the backup host:
 
 ```bash
 systemctl list-timers --all 'nfs-backup-*'
 systemctl status nfs-backup-backup.timer
 systemctl status nfs-backup@backup.service
-journalctl -u nfs-backup@backup.service -n 200 --no-pager
-docker ps --filter 'label=homelab.job'
+sudo journalctl -u nfs-backup@backup.service -n 200 --no-pager
+sudo docker ps --filter 'label=homelab.job'
 sudo nfs-backup-job restic snapshots \
   --host nfs-backup \
   --path /exports/docker \
@@ -68,7 +80,7 @@ Healthy timer state is usually `active (waiting)`.
 
 ### Service State
 
-The service exists only while work runs. A successful oneshot service usually returns to `inactive (dead)` after completion.
+The service process runs only while a job is active; its unit definition stays installed. A successful oneshot service usually returns to `inactive (dead)` after completion.
 
 ```bash
 systemctl status nfs-backup@backup.service
@@ -184,7 +196,7 @@ Inspect status and logs:
 
 ```bash
 systemctl status nfs-backup@backup.service
-journalctl -u nfs-backup@backup.service -n 300 --no-pager
+sudo journalctl -u nfs-backup@backup.service -n 300 --no-pager
 ```
 
 Then run the wrapper's read-only snapshot command:
@@ -210,7 +222,7 @@ Check:
 
 ```bash
 systemctl status docker
-docker version
+sudo docker version
 ```
 
 Start Docker:
@@ -222,7 +234,7 @@ sudo systemctl enable --now docker
 Investigate Docker logs if it does not start:
 
 ```bash
-journalctl -u docker -n 300 --no-pager
+sudo journalctl -u docker -n 300 --no-pager
 ```
 
 ## Docker Image Cannot Be Pulled
@@ -237,7 +249,7 @@ Symptoms:
 Check the configured Resticker version in `group_vars/all.yml` and test the pull:
 
 ```bash
-docker pull mazzolino/restic:1.8.2
+sudo docker pull mazzolino/restic:1.8.2
 ```
 
 Possible causes:
@@ -264,7 +276,7 @@ sudo ls -la /exports/docker
 
 Possible causes:
 
-- NFS server setup is incomplete
+- application-data preparation is incomplete
 - storage is not mounted
 - path changed
 - permissions prevent traversal
@@ -291,7 +303,7 @@ Possible explanations:
 
 For an existing deployment, compare the configured URL with the known provider location. Do not run `init` until you are certain the location is intentionally new.
 
-For a genuinely new repository, follow the initialization procedure in the main README.
+For a genuinely new repository, follow the [initialization procedure](../README.md#initialize-a-brand-new-repository).
 
 ## Wrong Password
 
@@ -331,9 +343,12 @@ Check:
 - bucket policy
 - provider-specific S3 compatibility settings
 
-Backup needs list, get, and put permissions. Prune additionally needs delete permission.
+Normal Restic S3 operations need to create and remove lock objects as well as
+list, read, and write repository objects. Prune also deletes expired snapshot
+and data objects. This runner uses the same credential set for every job.
 
-If backup succeeds but prune fails with access denied, missing delete permission is a likely cause.
+If backup succeeds but prune fails with access denied, check deletion permissions
+for snapshot/data objects and any provider object-lock policy.
 
 ## TLS Or Certificate Failure
 
@@ -394,7 +409,7 @@ sudo nfs-backup-job restic list locks
 Check local activity:
 
 ```bash
-docker ps --filter 'label=homelab.job'
+sudo docker ps --filter 'label=homelab.job'
 systemctl status 'nfs-backup@*.service'
 ```
 
@@ -444,23 +459,26 @@ Possible causes:
 
 Do not weaken the assertion until you understand which case applies. For a brand-new repository, initialize it and create the first backup as documented.
 
-## Deployment Rejects The Current Play Limit
+## Deployment Requires One Backup Host
 
 The play requires:
 
 - exactly one inventory host in `nfs_servers`
 
-Run the complete playbook with the NFS host in scope:
+Run the complete playbook with that host in scope, using your own inventory as
+shown in the [deployment guide](../README.md#host-and-inventory):
 
 ```bash
 ansible-playbook \
   -i inventory.yml \
   deployments/nfs-backup/deploy.yml \
   --extra-vars @vault.yml \
-  --ask-vault-pass
+  --ask-vault-pass --ask-become-pass
 ```
 
-The scope requirement prevents duplicate jobs from multiple source hosts.
+The assertion checks the full `nfs_servers` group, so limiting a multi-host group
+to one host does not satisfy it. If a limit excludes the backup host completely,
+Ansible skips the play and no deployment occurs.
 
 ## Backup Completed With Exit Status 3
 
@@ -469,7 +487,7 @@ Restic exit status 3 means some source files could not be read, although an inco
 Inspect logs for exact paths:
 
 ```bash
-journalctl -u nfs-backup@backup.service -n 500 --no-pager
+sudo journalctl -u nfs-backup@backup.service -n 500 --no-pager
 ```
 
 Common causes:
@@ -508,7 +526,7 @@ Check:
 
 ```bash
 systemctl status nfs-backup@prune.service
-journalctl -fu nfs-backup@prune.service
+sudo journalctl -fu nfs-backup@prune.service
 ```
 
 Do not interrupt prune without a clear reason. Restic is designed to preserve repository consistency when interrupted, but future maintenance may be required and a stale lock may remain.
@@ -578,8 +596,8 @@ Do not make the cache world-writable.
 Check:
 
 ```bash
-df -h /restore
-sudo du -sh /restore/*
+sudo df -h /restore
+sudo du -h --max-depth=1 /restore
 ```
 
 Use a larger host destination configured through `restore_path`, redeploy, and
@@ -603,7 +621,7 @@ systemctl show nfs-backup@backup.service \
 Check journal retention and storage:
 
 ```bash
-journalctl --disk-usage
+sudo journalctl --disk-usage
 systemctl status systemd-journald
 ```
 
@@ -631,11 +649,11 @@ Correct time synchronization before backup or prune.
 
 Possible causes:
 
-- timers remain enabled on a former NFS host
+- timers remain enabled on a former backup host
 - manual and scheduled backups were both run
 - another host uses the same fixed Restic hostname
 
-Inspect known NFS hosts. Before moving inventory to a new NFS server, disable timers on the old host.
+Inspect known backup hosts. Before moving the inventory entry to a new host, disable timers on the old one and let any active job finish, as described in [Moving The Backup To Another Host](../README.md#moving-the-backup-to-another-host).
 
 ## Collect A Safe Diagnostic Summary
 
@@ -645,9 +663,9 @@ The following commands avoid printing the protected environment file or password
 systemctl list-timers --all 'nfs-backup-*'
 systemctl status nfs-backup-backup.timer --no-pager
 systemctl status nfs-backup@backup.service --no-pager
-journalctl -u nfs-backup@backup.service -n 200 --no-pager
-docker version
-docker ps --filter 'label=homelab.job'
+sudo journalctl -u nfs-backup@backup.service -n 200 --no-pager
+sudo docker version
+sudo docker ps --filter 'label=homelab.job'
 sudo nfs-backup-job restic version
 sudo nfs-backup-job restic snapshots \
   --host nfs-backup \
@@ -655,7 +673,7 @@ sudo nfs-backup-job restic snapshots \
   --tag nfs-backup \
   --latest 3
 sudo nfs-backup-job restic list locks
-df -h /exports/docker /restore /var/cache/nfs-backup
+sudo df -h /exports/docker /restore /var/cache/nfs-backup
 timedatectl status
 ```
 

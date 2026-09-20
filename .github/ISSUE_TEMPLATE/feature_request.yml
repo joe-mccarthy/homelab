@@ -25,7 +25,7 @@ body:
     attributes:
       label: "Area"
       options:
-        - "Home server setup"
+        - "Home server setup or operations"
         - "Deployment"
         - "Maintenance"
         - "Documentation"

@@ -37,12 +37,12 @@ body:
     id: runtime
     attributes:
       label: "Runtime requirements"
-      description: "List ports, volumes, databases, devices, environment variables, or placement constraints."
+      description: "List ports, local storage, databases, devices, environment variables, and host requirements."
       value: |
         - Ports:
         - Volumes:
         - Secrets:
-        - Placement:
+        - Host architecture and resources:
         - External dependencies:
 
   - type: textarea
@@ -64,5 +64,6 @@ body:
       description: "What should be true when this deployment is done?"
       placeholder: |
         - A deployment README exists.
-        - The stack deploys through Ansible.
+        - The service deploys through its Ansible playbook.
+        - Container images use explicit tags or digests.
         - Secrets are read from vault values.

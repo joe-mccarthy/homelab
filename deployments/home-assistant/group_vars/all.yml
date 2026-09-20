@@ -25,6 +25,6 @@ home_assistant:
 # - data_dir is local to that host; it does not need to be an NFS mount.
 # - Define and encrypt all vault.services.home_assistant.* variables in the
 #   Ansible Vault.
-# - To edit encrypted variables: ansible-vault edit group_vars/all.yml
+# - To edit secrets in the encrypted vault: ansible-vault edit vault.yml
 # - proxy should be the IP/CIDR of your reverse proxy (e.g., "172.18.0.0/16").
 # - zigbee_serial_port accepts a local /dev path or a tcp:// URL.

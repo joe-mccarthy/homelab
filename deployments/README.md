@@ -36,23 +36,23 @@ Single-host Compose deployments retain root-owned projects beneath `/opt/<servic
 - **Services**:
   - **immich-server**: Main application with web interface and API
   - **immich-database**: PostgreSQL with vector extensions for AI features
-  - **immich-redis**: Cache and session storage for performance
+  - **immich-redis**: Valkey cache and job coordination
   - **immich-machine-learning**: AI processing for smart features
 - **Use Case**: Ideal for users looking to manage and organize their photo and video collections with advanced AI capabilities.
 - **Dependencies**: Runs with Docker Compose on the target host and requires local persistent storage plus the external Traefik `proxy` local bridge network.
 
 ### 4. [Paperless](paperless/README.md)
-- **Description**: Deploys Paperless-ngx with Redis, Gotenberg, and Tika for document management, OCR, and Office document conversion.
+- **Description**: Deploys Paperless-ngx with PostgreSQL, Redis, Gotenberg, and Tika for document management, OCR, and Office document conversion.
 - **Use Case**: Ideal for searchable archival and automated ingestion of scanned documents.
 - **Dependencies**: Runs with Docker Compose on the target host and requires local persistent storage plus the external Traefik `proxy` local bridge network.
 
 ### 5. [NFS Backup](nfs-backup/README.md)
 - **Description**: Runs encrypted Restic backups to S3 from short-lived containers scheduled by systemd; no backup container remains running between jobs.
-- **Schedule**: Daily backup at 00:00, weekly retention/prune, and weekly integrity checking.
-- **Retention**: Keeps the latest 24 hours plus 14 daily, 8 weekly, 12 monthly, and 3 yearly snapshots.
-- **Use Case**: Critical data protection for containerized applications with secure off-site storage
-- **Security**: All backups are strongly encrypted and services operate with least-privilege principles
-- **Dependencies**: Requires `/exports/docker` on the NFS server, Docker, systemd, and S3-compatible storage credentials
+- **Schedule**: Daily backup at 00:00, Sunday retention/prune at 03:30, and Sunday integrity checking at 08:30, all in `Europe/London`.
+- **Retention**: Keeps every snapshot within one day of the newest snapshot, plus 14 daily, 8 weekly, 12 monthly, and 3 yearly representatives. These selections overlap.
+- **Use Case**: Off-site protection for persistent application data.
+- **Data Handling**: Restic encrypts snapshots, and the source directory is mounted read-only in backup containers.
+- **Dependencies**: Requires local application data (default `/exports/docker`) on the single `nfs_servers` inventory host, Docker, systemd, and S3-compatible storage credentials.
 
 ### 6. [Omni Tools](omni/README.md)
 - **Description**: Deploys Omni Tools, a self-hosted browser-based collection of everyday utility tools. It provides a lightweight, privacy-friendly alternative to scattered online services.
@@ -60,13 +60,16 @@ Single-host Compose deployments retain root-owned projects beneath `/opt/<servic
 - **Dependencies**: Runs with Docker Compose on the target host and requires a local Traefik container on the external `proxy` bridge network.
 
 ### 7. [Traefik](traefik/README.md)
-- **Description**: Acts as a reverse proxy for other services, enabling name resolution instead of relying on IP addresses and ports. It also integrates with DNS providers to issue valid HTTPS certificates.
+- **Description**: Routes requests to local containers using hostname rules and obtains HTTPS certificates through Cloudflare DNS-01 challenges.
 - **Use Case**: Manages traffic and secures connections to the home lab applications.
-- **Dependencies**: None, but it is recommended to deploy Traefik first.
+- **Dependencies**: Requires Docker Compose, the external local `proxy` bridge, Cloudflare credentials, and a configured domain. Deploy it before the web applications.
 
 ## Service Versions
 
-| Service | Component | Version |
+These are the image tags configured in each service's `group_vars/all.yml`.
+Immich's database and Valkey images also have digest pins in that file.
+
+| Service | Component | Image tag |
 |---------|-----------|:-------:|
 | [DDNS](ddns/README.md) | cloudflare-ddns | `1.17.0` |
 | [Home Assistant](home-assistant/README.md) | home-assistant | `2026.8.3` |
@@ -75,9 +78,12 @@ Single-host Compose deployments retain root-owned projects beneath `/opt/<servic
 | [Home Assistant](home-assistant/README.md) | mosquitto | `2.1.2-alpine` |
 | [Immich](immich/README.md) | immich-server | `v3.1.0` |
 | [Immich](immich/README.md) | immich-machine-learning | `v3.1.0` |
+| [Immich](immich/README.md) | immich-redis (Valkey) | `9` (digest-pinned) |
+| [Immich](immich/README.md) | immich-database | `14-vectorchord0.4.3-pgvectors0.2.0` (digest-pinned) |
 | [NFS Backup](nfs-backup/README.md) | resticker | `1.8.2` |
 | [Paperless](paperless/README.md) | paperless-ngx | `3.1.0` |
 | [Paperless](paperless/README.md) | redis | `8.10.1` |
+| [Paperless](paperless/README.md) | PostgreSQL | `18.6-bookworm` |
 | [Paperless](paperless/README.md) | gotenberg | `8.36.0` |
 | [Paperless](paperless/README.md) | tika | `3.3.1.0` |
 | [Omni Tools](omni/README.md) | omni-tools | `0.6.0` |
@@ -91,7 +97,7 @@ Before deploying any services, ensure the following:
    - NFS Backup requires exactly one host in `nfs_servers` with Docker Engine and systemd.
 
 2. **Traefik Deployment**:
-   - Deploy Traefik first to handle proxying and certificate management for other services.
+   - Bootstrap the local `proxy` bridge with [`home_server/setup.yml`](../home_server/setup.yml), then deploy Traefik before the web applications. Traefik and the applications it routes must share that bridge on the same Docker host.
 
 3. **Ansible Inventory**:
    - Application deployments can target a reachable hostname or IP address directly with `-e target=...` and `-u <ssh-user>`. Supply your own inventory with `-i inventory.yml` when using inventory aliases or host-specific settings.
@@ -100,11 +106,43 @@ Before deploying any services, ensure the following:
 4. **DNS Configuration**:
    - Set up DNS records for the services you plan to deploy. Use Dynamic DNS if your public IP address changes frequently.
 
+5. **Configuration and Data**:
+   - Pass the encrypted vault explicitly with `--extra-vars @vault.yml --ask-vault-pass`, unless your inventory already loads the same variables.
+   - Immich and Paperless require existing data by default. Use their service-specific fresh-install option only when initializing a new installation.
+
 ## Usage
 
 Run the service playbook from the repository root. For example, to deploy Omni Tools:
 
 ```bash
 ansible-playbook deployments/omni/deploy.yml \
-  -e target=192.168.1.50 -u pi --extra-vars @vault.yml --ask-vault-pass
+  -e target=192.168.1.50 -u pi \
+  --extra-vars @vault.yml --ask-vault-pass --ask-become-pass
 ```
+
+Replace the address and SSH user. Add `--ask-pass` for SSH password authentication;
+omit `--ask-become-pass` when sudo is passwordless. See the service README for
+first-run settings and operations.
+
+## Retained Compose Projects
+
+Run Compose commands on the application host using these defaults:
+
+| Deployment | Project name | Project directory |
+| --- | --- | --- |
+| DDNS | `ddns` | `/opt/ddns` |
+| Home Assistant | `home_assistant` | `/opt/home-assistant` |
+| Immich | `immich` | `/opt/immich` |
+| Omni Tools | `omni` | `/opt/omni` |
+| Paperless | `paperless` | `/opt/paperless` |
+| Traefik | `traefik` | `/opt/traefik` |
+
+Home Assistant's directory and project names differ, so specify its project name:
+
+```bash
+sudo docker compose --project-directory /opt/home-assistant \
+  --project-name home_assistant ps
+```
+
+NFS Backup is managed through its systemd timers and `nfs-backup-job` runner;
+see the [backup operations guide](nfs-backup/README.md#routine-operations).

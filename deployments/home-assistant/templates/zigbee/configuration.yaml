@@ -114,8 +114,8 @@ frontend:
 
     port: 8080
     # Port number for the web interface.
-    # Access via: http://[container-ip]:8080
-    # In Docker deployments, this port should be mapped in docker-compose.yml
+    # Traefik routes https://zigbee2mqtt.<domain> to this internal port.
+    # The Compose template attaches this service to the local proxy bridge.
 
 # ============================================================================
 # Configuration Notes and Best Practices

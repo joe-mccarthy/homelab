@@ -2,6 +2,12 @@
 
 This guide explains how Restic chooses snapshots to keep, how pruning affects storage, and how to select a policy for this homelab.
 
+Settings are under `nfs_backup.retention` in
+[`group_vars/all.yml`](../group_vars/all.yml). Run `nfs-backup-job` and systemd
+commands on the backup host; run Ansible commands from the repository root on
+the controller. Inventory and authentication are described in the
+[deployment guide](../README.md#host-and-inventory).
+
 ## Retention In Plain English
 
 Backups accumulate snapshots. Retention answers:
@@ -52,7 +58,7 @@ keep 3 yearly snapshots
 
 Equivalent Restic options:
 
-```bash
+```text
 --keep-within 1d
 --keep-daily 14
 --keep-weekly 8
@@ -107,7 +113,7 @@ After the system settles at one snapshot per day, `keep-within 1d` usually adds 
 
 The prune job uses:
 
-```bash
+```text
 --host nfs-backup
 --path /exports/docker
 --tag nfs-backup
@@ -166,6 +172,8 @@ The scheduled command uses `forget --prune`. Restic invokes prune when snapshots
 ## Suggested Profiles
 
 All profiles assume one backup per day and retain all snapshots from the latest day.
+
+The YAML snippets below replace the `retention` mapping nested under `nfs_backup`.
 
 | Profile | Daily | Weekly | Monthly | Yearly | Suggested use |
 | --- | ---: | ---: | ---: | ---: | --- |
@@ -368,11 +376,15 @@ Immutability can protect against ransomware and compromised deletion credentials
 Common safer designs include:
 
 - a writable primary repository plus an independently protected second copy
-- storage credentials that can append but not delete for regular backup clients
+- an append-only backup backend with separate administrative access for pruning
 - separate administrative credentials for maintenance
 - provider snapshots or replication outside the backup host's credentials
 
 Test the exact provider behavior with a non-production repository.
+
+The current S3 runner uses one credential set for all jobs. Restricting deletion
+must still account for Restic's creation and removal of lock objects; deleting
+expired snapshots and packs also requires permission for those objects.
 
 ## Retention Is Not Backup Independence
 
@@ -395,7 +407,7 @@ For irreplaceable data, apply a 3-2-1 style strategy:
 
 ## Applying A New Policy
 
-1. Edit `retention` in `group_vars/all.yml`.
+1. Edit `nfs_backup.retention` in [`group_vars/all.yml`](../group_vars/all.yml).
 2. Run the proposed policy with `--dry-run`.
 3. Review the output carefully.
 4. Run Ansible from the repository root.
@@ -409,10 +421,10 @@ ansible-playbook \
   -i inventory.yml \
   deployments/nfs-backup/deploy.yml \
   --extra-vars @vault.yml \
-  --ask-vault-pass
+  --ask-vault-pass --ask-become-pass
 ```
 
-Run retention manually after approval:
+Run retention manually after reviewing the dry-run output:
 
 ```bash
 sudo systemctl start nfs-backup@prune.service
@@ -421,7 +433,7 @@ sudo systemctl start nfs-backup@prune.service
 Inspect logs:
 
 ```bash
-journalctl -u nfs-backup@prune.service -n 300 --no-pager
+sudo journalctl -u nfs-backup@prune.service -n 300 --no-pager
 ```
 
 ## When Prune Fails
@@ -441,7 +453,7 @@ Commands:
 
 ```bash
 sudo nfs-backup-job restic list locks
-journalctl -u nfs-backup@prune.service -n 300 --no-pager
+sudo journalctl -u nfs-backup@prune.service -n 300 --no-pager
 sudo nfs-backup-job restic check
 ```
 

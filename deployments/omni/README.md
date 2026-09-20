@@ -46,24 +46,25 @@ vault:
 
 ## Deploy
 
-Run from the repository root:
+Run from the repository root, replacing the example address and SSH user:
 
 ```bash
-ansible-playbook -i inventory.yml deployments/omni/deploy.yml \
-  -e target=odin --extra-vars @vault.yml --ask-vault-pass
+ansible-playbook deployments/omni/deploy.yml \
+  -e target=192.168.1.50 -u pi \
+  --extra-vars @vault.yml --ask-vault-pass --ask-become-pass
 ```
 
-Add `--ask-become-pass` if the remote user requires a sudo password.
+For inventory aliases or passwordless sudo, see the [command conventions](../../home_server/README.md#command-conventions). The vault is explicitly loaded by `--extra-vars @vault.yml`.
 
 The [`omni` role](roles/omni/tasks/main.yml) follows five ordered stages:
 
 | Stage | Task file | Responsibility |
 | --- | --- | --- |
-| Validate | `validate.yml` | Validate the Compose path, proxy network setting, and domain. |
-| Filesystem | `filesystem.yml` | Create the root-owned Compose project directory. |
-| Prepare | `prepare.yml` | Prepare Docker, validate the local proxy bridge, and render and validate Compose. |
-| Pull | `pull.yml` | Pull the pinned image before interrupting the existing container. |
-| Deploy | `deploy.yml` | Replace the existing container, start Compose, and verify Omni Tools is running. |
+| Validate | [`validate.yml`](roles/omni/tasks/validate.yml) | Validate the Compose path, proxy network setting, and domain. |
+| Filesystem | [`filesystem.yml`](roles/omni/tasks/filesystem.yml) | Create the root-owned Compose project directory. |
+| Prepare | [`prepare.yml`](roles/omni/tasks/prepare.yml) | Prepare Docker, validate the local proxy bridge, and render and validate Compose. |
+| Pull | [`pull.yml`](roles/omni/tasks/pull.yml) | Pull the pinned image before interrupting the existing container. |
+| Deploy | [`deploy.yml`](roles/omni/tasks/deploy.yml) | Replace the existing container, start Compose, and verify Omni Tools is running. |
 
 Each deployment recreates the `omni-tools` container using the validated Compose project and the already-pulled image.
 

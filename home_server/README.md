@@ -23,7 +23,7 @@ deployment continues.
 
 ## Prerequisites
 
-- The target account must have sudo access.
+- The target account must have SSH and sudo access.
 - The target must run Debian or Ubuntu.
 - Install the repository collections with
   `ansible-galaxy collection install -r requirements.yml`.
@@ -34,22 +34,20 @@ deployment continues.
 All home-server playbooks and the six application deployment playbooks accept
 `-e target=...`. Each command selects a single host.
 
+## Command Conventions
+
+Run commands from the repository root. Replace `192.168.1.50` and `pi` in the
+examples with the host address and SSH user. Add `--ask-pass` for SSH password
+authentication, and omit `--ask-become-pass` when sudo is passwordless.
+
+To use an inventory alias, add `-i inventory.yml` for your own inventory and use
+that alias as `target`. The inventory can supply the SSH user and connection settings.
+
 ## Bootstrap
-
-From the repository root, bootstrap an inventory host:
-
-```bash
-ansible-playbook -i inventory.yml home_server/setup.yml \
-  -e target=odin --extra-vars @vault.yml \
-  --ask-vault-pass --ask-become-pass
-```
-
-An inventory is optional when targeting an address directly. Supply the SSH
-user with `-u` and add `--ask-pass` if password authentication is required:
 
 ```bash
 ansible-playbook home_server/setup.yml \
-  -e target=192.168.1.50 -u pi --ask-pass \
+  -e target=192.168.1.50 -u pi \
   --extra-vars @vault.yml --ask-vault-pass --ask-become-pass
 ```
 
@@ -59,7 +57,8 @@ membership in an interactive shell.
 
 The bootstrap and service roles default to `/exports/docker`, `/opt`, and the
 `proxy` network. Change the corresponding service variables as well if these
-paths or the network name need to differ.
+paths or the network name need to differ. Changing a bootstrap variable alone
+does not change the paths in the individual deployment variable files.
 
 Each registry entry must contain non-empty credentials:
 
@@ -73,6 +72,10 @@ vault:
 
 Docker stores these credentials in root's Docker configuration because the
 deployment playbooks perform image pulls with privilege escalation.
+
+For public image pulls without registry authentication, set
+`vault.docker_registries: []`. `setup.yml` still requires the key to exist.
+The update, status, reboot, and storage playbooks do not require vault values.
 
 ## Update Packages
 
@@ -104,7 +107,7 @@ The read-only report includes:
 
 - OS version, uptime, memory usage, and the OS reboot flag.
 - Docker service state and installed Docker/Compose versions.
-- Running and stopped containers, with health details when an image defines a health check.
+- The container count and running/stopped states, with health details when a container has a health check.
 - Filesystem usage for `/`, `/exports/docker`, and `/opt`.
 - Load, enablement, activity, last-trigger, and next-trigger information for the
   NFS Backup `backup`, `prune`, and `check` timers.
@@ -144,9 +147,9 @@ ansible-playbook home_server/storage.yml \
 
 The playbook detects the filesystem type, mounts it at `/exports/docker`, writes
 the UUID-based entry to `/etc/fstab`, and verifies the mounted UUID. An unmounted
-target directory must be empty. An existing mount must use the requested UUID;
-if the filesystem is already mounted elsewhere, use that existing path as
-`home_server_data_root`.
+target directory must be readable and empty. The filesystem may be unmounted or
+mounted only at the requested path, and an existing mount at that path must use
+the requested UUID. The root filesystem `/` is not an application mount target.
 
 Set `home_server_storage_mount_options` for filesystem-specific options such as
 `defaults,noatime` or a Btrfs subvolume. If you change `home_server_data_root`,
@@ -163,30 +166,34 @@ update the application data paths and backup source configuration accordingly.
 | `home_server_status_paths` | `/`, data root, Compose root | Status: paths passed to `df`. |
 | `home_server_storage_uuid` | Required | Storage: existing filesystem UUID. |
 | `home_server_storage_mount_options` | `defaults` | Storage: mount options recorded in `/etc/fstab`. |
+| `home_server_proxy_network` | `proxy` | Setup: name of the external local bridge. |
 
 ## Deploy Applications
 
-After configuring the required values in the Ansible Vault, deploy services in
-dependency order:
+After configuring the required values in the Ansible Vault, deploy Traefik
+before the web applications. The commands below target the same Docker host:
 
 ```bash
-ansible-playbook -i inventory.yml deployments/traefik/deploy.yml -e target=odin \
-  --extra-vars @vault.yml --ask-vault-pass
-ansible-playbook -i inventory.yml deployments/ddns/deploy.yml -e target=odin \
-  --extra-vars @vault.yml --ask-vault-pass
-ansible-playbook -i inventory.yml deployments/omni/deploy.yml -e target=odin \
-  --extra-vars @vault.yml --ask-vault-pass
-ansible-playbook -i inventory.yml deployments/home-assistant/deploy.yml -e target=odin \
-  --extra-vars @vault.yml --ask-vault-pass
-ansible-playbook -i inventory.yml deployments/paperless/deploy.yml \
-  -e target=odin -e paperless_allow_fresh_install=true \
-  --extra-vars @vault.yml --ask-vault-pass
-ansible-playbook -i inventory.yml deployments/immich/deploy.yml \
-  -e target=odin -e immich_allow_fresh_install=true \
-  --extra-vars @vault.yml --ask-vault-pass
+ansible-playbook deployments/traefik/deploy.yml \
+  -e target=192.168.1.50 -u pi --extra-vars @vault.yml --ask-vault-pass --ask-become-pass
+ansible-playbook deployments/ddns/deploy.yml \
+  -e target=192.168.1.50 -u pi --extra-vars @vault.yml --ask-vault-pass --ask-become-pass
+ansible-playbook deployments/omni/deploy.yml \
+  -e target=192.168.1.50 -u pi --extra-vars @vault.yml --ask-vault-pass --ask-become-pass
+ansible-playbook deployments/home-assistant/deploy.yml \
+  -e target=192.168.1.50 -u pi --extra-vars @vault.yml --ask-vault-pass --ask-become-pass
+ansible-playbook deployments/paperless/deploy.yml \
+  -e target=192.168.1.50 -u pi --extra-vars @vault.yml --ask-vault-pass --ask-become-pass
+ansible-playbook deployments/immich/deploy.yml \
+  -e target=192.168.1.50 -u pi --extra-vars @vault.yml --ask-vault-pass --ask-become-pass
 ```
 
-The Paperless and Immich commands above intentionally initialize empty data
-directories. For subsequent deployments or restored installations, omit the
-corresponding `allow_fresh_install` variable to use the existing database and
-application data.
+The commands above are routine deployments. For a new Paperless installation,
+add `-e paperless_allow_fresh_install=true` to its first run. For a new Immich
+installation, add `-e immich_allow_fresh_install=true` to its first run. Later
+runs validate the existing database and application data.
+
+NFS Backup has its own deployment and requires one host in the `nfs_servers`
+inventory group. Follow its [host and inventory](../deployments/nfs-backup/README.md#host-and-inventory)
+and [repository initialization](../deployments/nfs-backup/README.md#initialize-a-brand-new-repository)
+instructions to configure the scheduled jobs.

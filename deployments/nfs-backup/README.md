@@ -2,6 +2,10 @@
 
 Encrypted, incremental backups of `/exports/docker` to S3-compatible object storage using Restic, short-lived Docker containers, systemd timers, and Ansible.
 
+The deployment retains the name **NFS Backup** and the `nfs_servers` inventory
+group, but it backs up local application files on that host. An NFS export or
+NFS mount is not required.
+
 This document assumes the reader has never used Restic or systemd timers before. It explains the design, installation, daily operation, safety checks, and recovery workflow.
 
 ## Read This First
@@ -12,7 +16,7 @@ The most important facts are:
 2. The backup timer activates at 00:00. The runner starts a temporary container
    as soon as any earlier local job has released its lock.
 3. Prune and check use the same start-work-exit lifecycle on their own schedules.
-4. Backups are encrypted before they leave the NFS server.
+4. Backups are encrypted before they leave the backup host.
 5. The Restic encryption key is required for every restore. Losing it means losing the backups.
 6. The source is mounted read-only, and restores go to `/restore`, not over live data.
 7. Repository initialization is intentionally manual so a typo cannot silently create a new empty backup history.
@@ -26,7 +30,7 @@ Additional runbooks:
 
 ## What This Deployment Does
 
-This deployment protects the host directory `/exports/docker`. In this homelab, that directory contains application data exported by the NFS server.
+This deployment protects the local application-data directory configured by `nfs_backup.source_path`, which defaults to `/exports/docker`.
 
 It provides:
 
@@ -57,6 +61,11 @@ This distinction is important for a new operator.
 
 For databases, use application-specific dumps or filesystem snapshots if crash-consistent files are not sufficient. Store those dumps beneath `/exports/docker` so Restic includes them.
 
+The default source does not include the retained Compose projects in `/opt`,
+the backup credentials in `/etc/nfs-backup`, or the controller's vault file.
+Application Compose files and secrets can be recreated from this repository and
+your vault when recovering the data.
+
 ## Key Terms
 
 | Term | Plain-English meaning |
@@ -64,7 +73,7 @@ For databases, use application-specific dumps or filesystem snapshots if crash-c
 | Ansible | Automation that installs and configures the backup system on the correct hosts. |
 | Docker image | The packaged software used to start a temporary Restic container. |
 | Container | A temporary isolated process. These containers exist only while a job is running. |
-| systemd | The Linux service manager already running on the NFS host. It schedules these jobs without another permanent container. |
+| systemd | The Linux service manager on the backup host. It schedules these jobs without another permanent container. |
 | Service unit | A systemd definition describing what command to run. Here it runs one Restic job and exits. |
 | Timer unit | A systemd definition describing when to start a service unit. |
 | Restic | The backup program that encrypts, deduplicates, uploads, checks, and restores data. |
@@ -106,14 +115,14 @@ S3 Restic repository
     |
     | decrypt and download
     v
-/restore on the NFS server
+/restore on the backup host
 ```
 
 The live source and restore destination are deliberately different. An operator must inspect restored data before choosing whether to copy it back into production.
 
 ## Why systemd Schedules the Jobs
 
-The NFS server already runs systemd. A systemd timer consumes negligible resources and starts a temporary Docker container only when work is due. This avoids an always-running scheduling container and uses only the host's local Docker daemon.
+The backup host runs systemd. A systemd timer consumes negligible resources and starts a temporary Docker container only when work is due. This avoids an always-running scheduling container and uses only the host's local Docker daemon.
 
 ## Job Lifecycle
 
@@ -232,7 +241,7 @@ sudo nfs-backup-job restic check --read-data
 
 | Path | Purpose |
 | --- | --- |
-| `deploy.yml` | Coordinates safe preparation and timer activation on the NFS host. |
+| `deploy.yml` | Coordinates preparation and timer activation on the backup host. |
 | `group_vars/all.yml` | Non-secret configuration plus references to Vault secrets. |
 | `roles/deploy_backup/tasks/main.yml` | Installs files and performs safety checks without enabling timers. |
 | `roles/deploy_backup/tasks/enable_timers.yml` | Activates timers only after validation succeeds. |
@@ -242,7 +251,7 @@ sudo nfs-backup-job restic check --read-data
 | `roles/deploy_backup/templates/restic.env.j2` | Builds protected container environment settings. |
 | `docs/` | Operator runbooks for restores, retention, and troubleshooting. |
 
-## Files Installed On The NFS Server
+## Files Installed On The Backup Host
 
 | Installed path | Mode | Purpose |
 | --- | ---: | --- |
@@ -266,13 +275,13 @@ Confirm all items before deployment.
 
 ### Host And Inventory
 
-- Ansible collections from `requirements.yml` are installed on the controller.
-- The NFS server runs a systemd-based Linux distribution.
-- Docker is installed on the NFS server.
+- Ansible collections from [`requirements.yml`](../../requirements.yml) are installed on the controller.
+- The backup host runs a systemd-based Linux distribution with Python and `flock` available.
+- Docker is installed on the backup host; [`home_server/setup.yml`](../../home_server/setup.yml) prepares Debian and Ubuntu hosts.
 - Docker starts successfully with `systemctl status docker`.
 - Exactly one inventory host belongs to `nfs_servers`.
-- The NFS host has `/exports/docker` as a real directory.
-- The NFS host can resolve and reach the S3 endpoint.
+- The backup host has the intended application data under `/exports/docker`, or the configured `source_path`.
+- The backup host can resolve and reach the S3 endpoint.
 - Host time is synchronized, normally with systemd-timesyncd, chrony, or NTP.
 
 Install the required Ansible collections from the repository root:
@@ -281,18 +290,25 @@ Install the required Ansible collections from the repository root:
 ansible-galaxy collection install -r requirements.yml
 ```
 
-Example inventory structure:
+Create your own `inventory.yml` in the repository root. This deployment selects
+the `nfs_servers` group rather than using the application playbooks' `target`
+variable. Replace the sample address and SSH user:
 
 ```yaml
 all:
   children:
     nfs_servers:
       hosts:
-        odin:
-          ansible_host: 192.168.1.11
+        backup_host:
+          ansible_host: 192.168.1.50
           ansible_user: pi
-
+          ansible_python_interpreter: /usr/bin/python3
 ```
+
+Add `--ask-pass` when SSH password authentication is required. The deployment
+examples include `--ask-become-pass`; omit it when sudo is passwordless. Host
+commands such as `nfs-backup-job`, Docker inspection, and journal access are run
+on the backup host, using `sudo` where required.
 
 ### S3 Repository
 
@@ -354,7 +370,7 @@ ansible-playbook \
   -i inventory.yml \
   deployments/nfs-backup/deploy.yml \
   --extra-vars @vault.yml \
-  --ask-vault-pass
+  --ask-vault-pass --ask-become-pass
 ```
 
 If a securely managed Vault password file is already part of your workflow,
@@ -457,35 +473,32 @@ sudo nfs-backup-job restic forget \
 
 ## Deploy An Existing Repository
 
-Run the playbook:
+Run the playbook from the repository root:
 
 ```bash
 ansible-playbook \
   -i inventory.yml \
   deployments/nfs-backup/deploy.yml \
   --extra-vars @vault.yml \
-  --ask-vault-pass
+  --ask-vault-pass --ask-become-pass
 ```
 
 ### What The Playbook Does
 
 The deployment performs these steps in order:
 
-1. Confirm exactly one NFS host is configured.
-2. Ensure Docker and `flock` are available.
-3. If this scheduler is already installed, stop and disable its timers.
-4. Acquire the runner lock continuously across installation and timer activation.
-5. Validate non-empty, safe configuration values.
-6. Verify `/exports/docker` exists and is a directory.
-7. Create protected configuration, cache, and restore directories.
-8. Install the runner and systemd units.
-9. Ask `systemd-analyze verify` to parse installed units.
-10. Pull the image if missing and open the configured repository.
-11. Require an existing snapshot for host `nfs-backup`, path `/exports/docker`,
+1. Confirm exactly one host is configured in `nfs_servers`.
+2. Record existing managed files and timer states, and preserve rollback copies.
+3. Stop and disable existing timers, acquire the host lock, and mark the deployment maintenance window.
+4. Ensure the locking dependency is installed and Docker is enabled and running.
+5. Validate configuration, source data, and separation of source and managed paths.
+6. Create protected configuration, cache, and restore directories.
+7. Install the runner and systemd units, then validate them with `systemd-analyze verify`.
+8. Pull the image if missing and open the configured repository.
+9. Require an existing snapshot for host `nfs-backup`, path `/exports/docker`,
    and tag `nfs-backup`.
-12. Refuse activation if any repository lock exists.
-13. Recheck repository locks immediately before timer activation.
-14. Enable and start the three systemd timers.
+10. Check repository locks and recheck them immediately before timer activation.
+11. Enable and start the three timers, end maintenance, release the host lock, and remove rollback files.
 
 Timers are enabled after validation succeeds. If deployment fails before
 scheduler activation, managed files and prior timer states are restored. Fix
@@ -498,7 +511,7 @@ Automatic initialization is disabled. This prevents a misspelled bucket or prefi
 
 For a genuinely new repository:
 
-1. Run the playbook with `--extra-vars @vault.yml --ask-vault-pass`.
+1. Run the playbook using the deployment command above, with your inventory and vault.
 2. It installs the protected configuration, runner, and systemd units.
 3. Repository or snapshot validation stops the play with every timer disabled
    while retaining those fresh installation artifacts.
@@ -507,7 +520,7 @@ For a genuinely new repository:
 6. Create and inspect the first backup.
 7. Rerun the playbook to complete timer activation.
 
-Commands on the NFS host:
+Commands on the backup host:
 
 ```bash
 sudo nfs-backup-job restic init
@@ -525,7 +538,7 @@ ansible-playbook \
   -i inventory.yml \
   deployments/nfs-backup/deploy.yml \
   --extra-vars @vault.yml \
-  --ask-vault-pass
+  --ask-vault-pass --ask-become-pass
 ```
 
 Immediately store a secure offline copy of the encryption key.
@@ -557,7 +570,7 @@ systemctl show nfs-backup-backup.timer \
 ### Confirm No Idle Container Exists
 
 ```bash
-docker ps --filter 'label=homelab.job'
+sudo docker ps --quiet --filter 'label=homelab.job'
 ```
 
 No output between jobs is the expected healthy state.
@@ -571,7 +584,7 @@ sudo systemctl start nfs-backup@backup.service
 `systemctl start` waits for the one-shot service to finish. In another terminal, follow progress:
 
 ```bash
-journalctl -fu nfs-backup@backup.service
+sudo journalctl -fu nfs-backup@backup.service
 ```
 
 ### Confirm A New Snapshot Exists
@@ -626,19 +639,19 @@ systemctl status nfs-backup@check.service
 Latest backup logs:
 
 ```bash
-journalctl -u nfs-backup@backup.service -n 200 --no-pager
+sudo journalctl -u nfs-backup@backup.service -n 200 --no-pager
 ```
 
 Logs since yesterday:
 
 ```bash
-journalctl -u nfs-backup@backup.service --since yesterday
+sudo journalctl -u nfs-backup@backup.service --since yesterday
 ```
 
 Follow the active job:
 
 ```bash
-journalctl -fu nfs-backup@backup.service
+sudo journalctl -fu nfs-backup@backup.service
 ```
 
 ### Start Jobs Manually
@@ -653,7 +666,7 @@ To return immediately and watch logs separately:
 
 ```bash
 sudo systemctl start --no-block nfs-backup@backup.service
-journalctl -fu nfs-backup@backup.service
+sudo journalctl -fu nfs-backup@backup.service
 ```
 
 ### List Snapshots
@@ -725,20 +738,20 @@ sudo nfs-backup-job restic unlock
 
 ## Restoring Data
 
-The short version is:
+Replace the quoted snapshot-ID placeholder with an ID from the snapshot list:
 
 ```bash
 sudo nfs-backup-job restic snapshots \
   --host nfs-backup \
   --path /exports/docker \
   --tag nfs-backup
-sudo nfs-backup-job restic restore <snapshot-id> --target /restore
+sudo nfs-backup-job restic restore '<snapshot-id>' --target /restore
 ```
 
 For a single path:
 
 ```bash
-sudo nfs-backup-job restic restore <snapshot-id> \
+sudo nfs-backup-job restic restore '<snapshot-id>' \
   --include /exports/docker/path/to/data \
   --target /restore
 ```
@@ -762,6 +775,17 @@ At minimum, monitor:
 - unexpected repository growth
 - integrity-check failures
 - free space beneath `/restore` before recovery
+
+For a host-side overview from the controller, use
+[`home_server/status.yml`](../../home_server/status.yml):
+
+```bash
+ansible-playbook home_server/status.yml \
+  -e target=192.168.1.50 -u pi --ask-become-pass
+```
+
+That report includes timer configuration and activity. Use the repository and
+service-result checks below to establish whether backups completed successfully.
 
 Useful commands for a simple health check:
 
@@ -801,11 +825,13 @@ record service results and snapshot times outside transient unit state.
 
 ### What Root Can Still See
 
-Root and anyone with Docker daemon access can inspect running containers, mounts, and environment configuration. Docker access is effectively root-level access. Restrict membership of the `docker` group and access to the NFS server.
+Root and anyone with Docker daemon access can inspect running containers, mounts, and environment configuration. Docker access is effectively root-level access. Restrict membership of the `docker` group and access to the backup host.
 
 ### S3 Delete Permission
 
-Prune needs delete permission. That also means a compromised backup host could delete repository objects. For important data, add protection outside this host:
+Normal Restic operations need to create and remove repository lock objects;
+prune also deletes expired snapshot and data objects. This deployment uses one
+S3 credential set for all jobs. For important data, add protection outside this host:
 
 - S3 object lock or immutability where supported
 - bucket versioning with protected lifecycle rules
@@ -817,7 +843,7 @@ Prune needs delete permission. That also means a compromised backup host could d
 Keep the key in at least two secure locations. Do not store the only copy:
 
 - only in the repository being protected
-- only on the NFS server
+- only on the backup host
 - only in an untested Vault file
 - only in one person's memory
 
@@ -837,10 +863,11 @@ ansible-playbook \
   -i inventory.yml \
   deployments/nfs-backup/deploy.yml \
   --extra-vars @vault.yml \
-  --ask-vault-pass
+  --ask-vault-pass --ask-become-pass
 ```
 
-The role restarts a timer only when its rendered unit changed.
+Every deployment pauses existing timers during installation and validation, then
+starts them again. Changed timer units are activated with a restart.
 
 ## Changing Retention
 
@@ -885,7 +912,7 @@ active job and normally wait for it to finish before moving the deployment:
 
 ```bash
 systemctl status 'nfs-backup@*.service'
-docker ps --filter 'label=homelab.job'
+sudo docker ps --filter 'label=homelab.job'
 sudo nfs-backup-job restic list locks
 ```
 
@@ -932,7 +959,7 @@ active and that no repository lock belongs to this host:
 
 ```bash
 systemctl status 'nfs-backup@*.service'
-docker ps --filter 'label=homelab.job'
+sudo docker ps --filter 'label=homelab.job'
 sudo nfs-backup-job restic list locks
 ```
 
@@ -948,7 +975,7 @@ Do not delete the S3 repository as part of scheduler removal. Repository deletio
 
 ## Disaster Recovery Overview
 
-If the original cluster is unavailable:
+If the original application-data host is unavailable:
 
 1. Obtain the offline Restic encryption key.
 2. Obtain S3 repository credentials and endpoint details.

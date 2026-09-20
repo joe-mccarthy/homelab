@@ -27,7 +27,12 @@ Single-host Compose deployments retain root-owned projects beneath `/opt/<servic
 - **Use Case**: Perfect for managing and automating smart home devices.
 - **Dependencies**: Runs with Docker Compose on the target host and requires local Traefik proxying, LAN IPv6/mDNS, and a local or TCP-connected Zigbee coordinator.
 
-### 3. [Immich](immich/README.md)
+### 3. [Homebox](homebox/README.md)
+- **Description**: Deploys Homebox, a self-hosted home inventory and organization system, with PostgreSQL.
+- **Use Case**: Ideal for cataloging household items, locations, warranties, and attachments.
+- **Dependencies**: Runs with Docker Compose on the target host and requires local persistent storage plus the external Traefik `proxy` local bridge network.
+
+### 4. [Immich](immich/README.md)
 - **Description**: Immich is a high-performance self-hosted photo and video management solution that serves as a complete alternative to Google Photos. Features include:
   - Web interface and mobile apps for photo browsing and automatic backup
   - AI-powered features including face recognition and object detection
@@ -41,12 +46,12 @@ Single-host Compose deployments retain root-owned projects beneath `/opt/<servic
 - **Use Case**: Ideal for users looking to manage and organize their photo and video collections with advanced AI capabilities.
 - **Dependencies**: Runs with Docker Compose on the target host and requires local persistent storage plus the external Traefik `proxy` local bridge network.
 
-### 4. [Paperless](paperless/README.md)
+### 5. [Paperless](paperless/README.md)
 - **Description**: Deploys Paperless-ngx with PostgreSQL, Redis, Gotenberg, and Tika for document management, OCR, and Office document conversion.
 - **Use Case**: Ideal for searchable archival and automated ingestion of scanned documents.
 - **Dependencies**: Runs with Docker Compose on the target host and requires local persistent storage plus the external Traefik `proxy` local bridge network.
 
-### 5. [NFS Backup](nfs-backup/README.md)
+### 6. [NFS Backup](nfs-backup/README.md)
 - **Description**: Runs encrypted Restic backups to S3 from short-lived containers scheduled by systemd; no backup container remains running between jobs.
 - **Schedule**: Daily backup at 00:00, Sunday retention/prune at 03:30, and Sunday integrity checking at 08:30, all in `Europe/London`.
 - **Retention**: Keeps every snapshot within one day of the newest snapshot, plus 14 daily, 8 weekly, 12 monthly, and 3 yearly representatives. These selections overlap.
@@ -54,12 +59,12 @@ Single-host Compose deployments retain root-owned projects beneath `/opt/<servic
 - **Data Handling**: Restic encrypts snapshots, and the source directory is mounted read-only in backup containers.
 - **Dependencies**: Requires local application data (default `/exports/docker`) on the single `nfs_servers` inventory host, Docker, systemd, and S3-compatible storage credentials.
 
-### 6. [Omni Tools](omni/README.md)
+### 7. [Omni Tools](omni/README.md)
 - **Description**: Deploys Omni Tools, a self-hosted browser-based collection of everyday utility tools. It provides a lightweight, privacy-friendly alternative to scattered online services.
 - **Use Case**: Ideal for users who want a single, self-hosted destination for common utility tasks without relying on third-party websites.
 - **Dependencies**: Runs with Docker Compose on the target host and requires a local Traefik container on the external `proxy` bridge network.
 
-### 7. [Traefik](traefik/README.md)
+### 8. [Traefik](traefik/README.md)
 - **Description**: Routes requests to local containers using hostname rules and obtains HTTPS certificates through Cloudflare DNS-01 challenges.
 - **Use Case**: Manages traffic and secures connections to the home lab applications.
 - **Dependencies**: Requires Docker Compose, the external local `proxy` bridge, Cloudflare credentials, and a configured domain. Deploy it before the web applications.
@@ -76,6 +81,8 @@ Immich's database and Valkey images also have digest pins in that file.
 | [Home Assistant](home-assistant/README.md) | matter-server | `1.4.0` |
 | [Home Assistant](home-assistant/README.md) | zigbee2mqtt | `2.13.0` |
 | [Home Assistant](home-assistant/README.md) | mosquitto | `2.1.2-alpine` |
+| [Homebox](homebox/README.md) | homebox | `0.26.2-rootless` |
+| [Homebox](homebox/README.md) | PostgreSQL | `17.6-alpine` |
 | [Immich](immich/README.md) | immich-server | `v3.1.0` |
 | [Immich](immich/README.md) | immich-machine-learning | `v3.1.0` |
 | [Immich](immich/README.md) | immich-redis (Valkey) | `9` (digest-pinned) |
@@ -108,7 +115,7 @@ Before deploying any services, ensure the following:
 
 5. **Configuration and Data**:
    - Pass the encrypted vault explicitly with `--extra-vars @vault.yml --ask-vault-pass`, unless your inventory already loads the same variables.
-   - Immich and Paperless require existing data by default. Use their service-specific fresh-install option only when initializing a new installation.
+   - Homebox, Immich, and Paperless require existing data by default. Use their service-specific fresh-install option only when initializing a new installation.
 
 ## Usage
 
@@ -132,6 +139,7 @@ Run Compose commands on the application host using these defaults:
 | --- | --- | --- |
 | DDNS | `ddns` | `/opt/ddns` |
 | Home Assistant | `home_assistant` | `/opt/home-assistant` |
+| Homebox | `homebox` | `/opt/homebox` |
 | Immich | `immich` | `/opt/immich` |
 | Omni Tools | `omni` | `/opt/omni` |
 | Paperless | `paperless` | `/opt/paperless` |

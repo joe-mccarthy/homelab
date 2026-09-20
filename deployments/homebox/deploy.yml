@@ -1,0 +1,30 @@
+---
+- name: Validate Homebox target
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: Require a Homebox target
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target | default('') | string | trim | length > 0
+        fail_msg: >-
+          Pass an inventory hostname, DNS name, or IP address with
+          -e target=<host-or-address>.
+
+    - name: Add Homebox target to the temporary deployment group
+      ansible.builtin.add_host:
+        name: "{{ target | string | trim }}"
+        groups: deployment_target
+
+- name: Deploy Homebox
+  hosts: deployment_target
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+
+  tasks:
+    - name: Run staged Homebox deployment
+      ansible.builtin.include_role:
+        name: homebox

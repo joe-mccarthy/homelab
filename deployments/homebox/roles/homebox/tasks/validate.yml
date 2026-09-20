@@ -1,0 +1,82 @@
+---
+- name: Require the local application data root
+  ansible.builtin.stat:
+    path: "{{ homebox.data_dir | dirname }}"
+  register: homebox_data_parent
+
+- name: Verify the local application data root
+  ansible.builtin.assert:
+    that:
+      - homebox_data_parent.stat.exists
+      - homebox_data_parent.stat.isdir
+    fail_msg: >-
+      {{ homebox.data_dir | dirname }} must exist on the single Compose host
+
+- name: Inspect the existing Homebox PostgreSQL cluster
+  ansible.builtin.stat:
+    path: "{{ homebox.database.data_dir }}/PG_VERSION"
+  register: homebox_database_version
+
+- name: Require the existing Homebox PostgreSQL cluster
+  ansible.builtin.assert:
+    that:
+      - >-
+        (homebox.allow_fresh_install | bool)
+        or (
+          (homebox_database_version.stat.exists | default(false))
+          and (homebox_database_version.stat.isreg | default(false))
+          and (homebox_database_version.stat.size | default(0) | int > 0)
+        )
+    fail_msg: >-
+      {{ homebox.database.data_dir }}/PG_VERSION must identify an existing
+      database. Correct the data path, or explicitly set
+      homebox_allow_fresh_install=true for an intentional new installation.
+
+- name: Read the Homebox PostgreSQL cluster version
+  ansible.builtin.slurp:
+    src: "{{ homebox.database.data_dir }}/PG_VERSION"
+  register: homebox_database_version_file
+  when: homebox_database_version.stat.exists | default(false)
+
+- name: Require the configured Homebox PostgreSQL major version
+  ansible.builtin.assert:
+    that:
+      - >-
+        homebox_database_version_file.content | b64decode | trim
+        == homebox.database.major_version
+    fail_msg: >-
+      The existing Homebox PostgreSQL cluster does not match configured major
+      version {{ homebox.database.major_version }}.
+  when: homebox_database_version.stat.exists | default(false)
+
+- name: Inspect the existing Homebox application data directory
+  ansible.builtin.stat:
+    path: "{{ homebox.data_dir }}/data"
+  register: homebox_application_data_directory
+
+- name: Require the existing Homebox application data directory
+  ansible.builtin.assert:
+    that:
+      - >-
+        (homebox.allow_fresh_install | bool)
+        or (
+          (homebox_application_data_directory.stat.exists | default(false))
+          and (homebox_application_data_directory.stat.isdir | default(false))
+        )
+    fail_msg: >-
+      {{ homebox.data_dir }}/data must be the existing attachment data
+      directory. Correct the data path, or explicitly set
+      homebox_allow_fresh_install=true for an intentional new installation.
+
+- name: Validate Homebox secrets and database configuration
+  ansible.builtin.assert:
+    that:
+      - homebox.api_key_pepper | string | length >= 32
+      - homebox.database.name | string | trim | length > 0
+      - homebox.database.user | string | trim | length > 0
+      - homebox.database.password | string | length >= 32
+      - vault.shared.general.domain | default('') | string | trim | length > 0
+    fail_msg: >-
+      Homebox requires a domain, an API key pepper and database password of at
+      least 32 characters, and non-empty database name and user values.
+  no_log: true

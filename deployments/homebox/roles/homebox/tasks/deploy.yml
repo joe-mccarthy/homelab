@@ -1,0 +1,49 @@
+---
+- name: Remove existing Homebox containers before deployment
+  community.docker.docker_container:
+    name: "{{ item }}"
+    state: absent
+    keep_volumes: true
+    stop_timeout: 30
+  loop:
+    - homebox
+    - homebox-postgres
+  loop_control:
+    label: "{{ item }}"
+
+- name: Create and start Homebox containers
+  community.docker.docker_compose_v2:
+    project_src: "{{ homebox.compose_dir }}"
+    project_name: homebox
+    state: present
+    pull: never
+    recreate: always
+    remove_orphans: true
+    wait: true
+    wait_timeout: 300
+  register: homebox_compose
+
+- name: Verify every Homebox service is running
+  ansible.builtin.assert:
+    that:
+      - >-
+        homebox_expected_services
+        | difference(homebox_actual_services)
+        | length == 0
+      - homebox_non_running_services | length == 0
+    fail_msg: >-
+      Compose did not start every Homebox service. Missing:
+      {{ homebox_expected_services | difference(homebox_actual_services) }};
+      not running: {{ homebox_non_running_services }}
+  vars:
+    homebox_expected_services:
+      - homebox
+      - homebox-database
+    homebox_actual_services: >-
+      {{ homebox_compose.containers
+         | map(attribute='Service') | unique | list }}
+    homebox_non_running_services: >-
+      {{ homebox_compose.containers
+         | rejectattr('State', 'equalto', 'running')
+         | map(attribute='Service') | unique | list }}
+  when: not ansible_check_mode

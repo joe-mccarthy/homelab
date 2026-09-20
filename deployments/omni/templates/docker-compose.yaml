@@ -10,6 +10,17 @@ services:
       proxy:
         aliases:
           - "omni.{{ vault.shared.general.domain }}"
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - --quiet
+        - --spider
+        - http://127.0.0.1/
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     labels:
       traefik.enable: 'true'
       traefik.http.routers.omni.entrypoints: web

@@ -1,0 +1,26 @@
+---
+homebox:
+  # Single-host paths and Docker network
+  data_dir: /exports/docker/homebox
+  compose_dir: /opt/homebox
+  proxy_network: proxy
+  allow_fresh_install: "{{ homebox_allow_fresh_install | default(false) }}"
+
+  # Stable secrets (from Ansible Vault)
+  api_key_pepper: "{{ vault.services.homebox.api_key_pepper }}"
+  database:
+    data_dir: /exports/docker/homebox/database
+    major_version: '17'
+    name: homebox
+    user: homebox
+    password: "{{ vault.services.homebox.database_password }}"
+
+  # Pinned image tags for reproducible deployments
+  versions:
+    app: "0.26.2-rootless"
+    database: "17.6-alpine"
+
+# Notes:
+# - The play targets the host passed with -e target=<host-or-address>.
+# - Keep api_key_pepper stable; rotating it invalidates every issued API key.
+# - PostgreSQL data must reside on local storage.

@@ -1,0 +1,62 @@
+---
+- name: Create Homebox data directory
+  ansible.builtin.file:
+    path: "{{ homebox.data_dir }}"
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: Create Homebox application data directory
+  ansible.builtin.file:
+    path: "{{ homebox.data_dir }}/data"
+    state: directory
+    mode: '0750'
+    owner: '65532'
+    group: '65532'
+
+- name: Create Homebox PostgreSQL data directory
+  ansible.builtin.file:
+    path: "{{ homebox.database.data_dir }}"
+    state: directory
+    mode: '0700'
+    owner: '70'
+    group: '70'
+
+- name: Identify the Homebox PostgreSQL filesystem
+  ansible.builtin.command:
+    argv:
+      - stat
+      - --file-system
+      - --format=%T
+      - "{{ homebox.database.data_dir }}"
+  register: homebox_database_filesystem
+  changed_when: false
+
+- name: Require a supported local PostgreSQL filesystem
+  ansible.builtin.assert:
+    that:
+      - homebox_database_filesystem.stdout in homebox_local_filesystems
+    fail_msg: >-
+      {{ homebox.database.data_dir }} uses unsupported filesystem
+      {{ homebox_database_filesystem.stdout }}. PostgreSQL must use local
+      storage.
+  vars:
+    homebox_local_filesystems:
+      - btrfs
+      - ext2/ext3
+      - ext4
+      - f2fs
+      - xfs
+      - zfs
+
+- name: Create Homebox Compose project directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0700'
+    owner: root
+    group: root
+  loop:
+    - "{{ homebox.compose_dir }}"
+    - "{{ homebox.compose_dir }}/secrets"

@@ -1,0 +1,93 @@
+---
+# Traefik label keys and Jinja expressions are intentionally kept intact.
+# yamllint disable rule:line-length
+name: homebox
+
+services:
+  homebox-database:
+    container_name: homebox-postgres
+    image: "docker.io/library/postgres:{{ homebox.versions.database }}"
+    restart: unless-stopped
+    volumes:
+      - "{{ homebox.database.data_dir }}:/var/lib/postgresql/data"
+    secrets:
+      - homebox_database_password
+    environment:
+      POSTGRES_DB: "{{ homebox.database.name }}"
+      POSTGRES_USER: "{{ homebox.database.user }}"
+      POSTGRES_PASSWORD_FILE: /run/secrets/homebox_database_password
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  homebox:
+    container_name: homebox
+    image: >-
+      docker.io/sysadminsmedia/homebox:{{ homebox.versions.app }}
+    restart: unless-stopped
+    networks:
+      - default
+      - proxy
+    volumes:
+      - "{{ homebox.data_dir }}/data:/data"
+    secrets:
+      - homebox_api_key_pepper
+      - homebox_database_password
+    environment:
+      HBOX_DATABASE_DRIVER: postgres
+      HBOX_DATABASE_HOST: homebox-database
+      HBOX_DATABASE_PORT: '5432'
+      HBOX_DATABASE_USERNAME: "{{ homebox.database.user }}"
+      HBOX_DATABASE_DATABASE: "{{ homebox.database.name }}"
+      HBOX_DATABASE_SSL_MODE: disable
+      HBOX_LOG_LEVEL: info
+      HBOX_LOG_FORMAT: text
+      HBOX_OPTIONS_ALLOW_ANALYTICS: 'false'
+      HBOX_OPTIONS_TRUST_PROXY: 'true'
+      HBOX_OPTIONS_HOSTNAME: >-
+        https://homebox.{{ vault.shared.general.domain }}
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |-
+        HBOX_AUTH_API_KEY_PEPPER="$$(cat /run/secrets/homebox_api_key_pepper)"
+        HBOX_DATABASE_PASSWORD="$$(cat /run/secrets/homebox_database_password)"
+        export HBOX_AUTH_API_KEY_PEPPER HBOX_DATABASE_PASSWORD
+        exec /app/api
+    depends_on:
+      homebox-database:
+        condition: service_healthy
+    labels:
+      traefik.enable: 'true'
+      traefik.http.routers.homebox.entrypoints: web
+      traefik.http.routers.homebox.rule: >-
+        Host(`homebox.{{ vault.shared.general.domain }}`)
+      traefik.http.middlewares.homebox-https-redirect.redirectscheme.scheme: >-
+        https
+      traefik.http.routers.homebox.middlewares: homebox-https-redirect
+      traefik.http.routers.homebox-secure.entrypoints: websecure
+      traefik.http.routers.homebox-secure.rule: >-
+        Host(`homebox.{{ vault.shared.general.domain }}`)
+      traefik.http.routers.homebox-secure.tls: 'true'
+      traefik.http.routers.homebox-secure.service: homebox
+      traefik.http.routers.homebox-secure.tls.certresolver: letsencrypt
+      traefik.http.services.homebox.loadbalancer.server.port: '7745'
+      traefik.docker.network: "{{ homebox.proxy_network }}"
+
+networks:
+  default:
+    name: homebox_compose
+  proxy:
+    external: true
+    name: "{{ homebox.proxy_network }}"
+
+secrets:
+  homebox_api_key_pepper:
+    file: ./secrets/homebox_api_key_pepper
+  homebox_database_password:
+    file: ./secrets/homebox_database_password

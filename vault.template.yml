@@ -24,6 +24,10 @@ vault:
       mqtt_server: ""
       zigbee_serial_port: ""
 
+    homebox:
+      api_key_pepper: ""
+      database_password: ""
+
     immich:
       database:
         user: ""

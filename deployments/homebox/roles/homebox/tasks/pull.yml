@@ -1,0 +1,15 @@
+---
+- name: Pull Homebox project image
+  community.docker.docker_compose_v2_pull:
+    project_src: "{{ homebox.compose_dir }}"
+    project_name: homebox
+    services:
+      - "{{ item }}"
+    policy: missing
+  loop:
+    - homebox-database
+    - homebox
+  loop_control:
+    label: "{{ item }}"
+  async: 3600
+  poll: 10

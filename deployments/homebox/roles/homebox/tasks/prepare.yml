@@ -1,0 +1,50 @@
+---
+- name: Ensure Docker Compose plugin is installed
+  ansible.builtin.package:
+    name: docker-compose-plugin
+    state: present
+
+- name: Ensure Docker is enabled and running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Validate Homebox proxy network
+  ansible.builtin.include_role:
+    name: validate_proxy_network
+  vars:
+    validate_proxy_network_name: "{{ homebox.proxy_network }}"
+
+- name: Write Homebox secrets
+  ansible.builtin.copy:
+    content: "{{ item.value }}"
+    dest: "{{ homebox.compose_dir }}/secrets/{{ item.name }}"
+    mode: '0444'
+    owner: root
+    group: root
+  loop:
+    - name: homebox_api_key_pepper
+      value: "{{ homebox.api_key_pepper }}"
+    - name: homebox_database_password
+      value: "{{ homebox.database.password }}"
+  no_log: true
+
+- name: Render Homebox Compose project
+  ansible.builtin.template:
+    src: templates/docker-compose.yaml
+    dest: "{{ homebox.compose_dir }}/compose.yaml"
+    mode: '0600'
+    owner: root
+    group: root
+
+- name: Validate rendered Homebox Compose project
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --project-directory
+      - "{{ homebox.compose_dir }}"
+      - config
+      - --quiet
+  changed_when: false

@@ -15,6 +15,13 @@ This directory includes deployments for personal applications, routing, DNS, and
 
 Single-host Compose deployments retain root-owned projects beneath `/opt/<service>` for normal `docker compose` operations.
 
+Long-running web, database, cache, broker, and conversion containers expose
+service-specific health checks. Compose startup waits for healthy hard
+dependencies, while independently reconnectable integrations are not ordered.
+The DDNS container is the exception: its hardened scratch image contains only
+the updater binary and exposes no local readiness interface, so Docker's
+running state and the updater logs are its health signals.
+
 ## Deployments
 
 ### 1. [DDNS](ddns/README.md)

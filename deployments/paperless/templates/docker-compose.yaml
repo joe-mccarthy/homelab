@@ -15,6 +15,10 @@ services:
         - CMD
         - redis-cli
         - ping
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   paperless-database:
     container_name: paperless-postgres
@@ -36,6 +40,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+      start_period: 30s
 
   paperless:
     container_name: paperless
@@ -79,9 +84,11 @@ services:
       paperless-database:
         condition: service_healthy
       paperless-gotenberg:
-        condition: service_started
+        condition: service_healthy
       paperless-tika:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      disable: false
     labels:
       traefik.enable: 'true'
       traefik.http.routers.paperless.entrypoints: web
@@ -108,11 +115,35 @@ services:
       - gotenberg
       - --chromium-disable-javascript=true
       - --chromium-allow-list=file:///tmp/.*
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - --silent
+        - --show-error
+        - --max-time
+        - '5'
+        - http://127.0.0.1:3000/health
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   paperless-tika:
     container_name: paperless-tika
     image: "docker.io/apache/tika:{{ paperless.versions.tika }}"
     restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - /usr/bin/bash
+        - -ec
+        - exec 3<>/dev/tcp/127.0.0.1/9998
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
 networks:
   default:

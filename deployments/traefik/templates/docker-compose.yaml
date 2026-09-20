@@ -18,6 +18,7 @@ services:
       - --api.insecure=false
       - "--api.dashboard={{ (traefik.dashboard.enabled | bool) | ternary('true', 'false') }}"
       - --api.debug=false
+      - --ping=true
 
       - --log.level=INFO
       - --log.filepath=/logs/traefik.log
@@ -45,6 +46,16 @@ services:
       - --entrypoints.websecure.http.tls.certresolver=letsencrypt
       - "--entrypoints.websecure.http.tls.domains[0].main={{ vault.shared.general.domain }}"
       - "--entrypoints.websecure.http.tls.domains[0].sans=*.{{ vault.shared.general.domain }}"
+    healthcheck:
+      test:
+        - CMD
+        - traefik
+        - healthcheck
+        - --ping
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     labels:
       traefik.enable: "{{ (traefik.dashboard.enabled | bool) | ternary('true', 'false') }}"
       traefik.http.routers.traefik.entrypoints: web

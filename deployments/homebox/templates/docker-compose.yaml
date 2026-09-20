@@ -24,6 +24,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+      start_period: 10s
 
   homebox:
     container_name: homebox
@@ -62,6 +63,8 @@ services:
     depends_on:
       homebox-database:
         condition: service_healthy
+    healthcheck:
+      disable: false
     labels:
       traefik.enable: 'true'
       traefik.http.routers.homebox.entrypoints: web
